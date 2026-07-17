@@ -1,0 +1,44 @@
+.DS_Store
+/target/
+/.env
+/.env.*
+!.env.example
+*.log
+*.pid
+*.sock
+*.part
+*.tmp
+*.bak
+
+# 本地 MindOne 状态与敏感数据
+.mindone/
+config.local.toml
+secrets/
+models/
+engines/
+runtime/
+cache/
+
+# 数据库与容器数据
+*.db
+*.sqlite
+*.sqlite3
+postgres-data/
+
+# 大模型与私钥
+*.gguf
+*.safetensors
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# 编辑器与平台文件
+.idea/
+.vscode/
+Thumbs.db
+
