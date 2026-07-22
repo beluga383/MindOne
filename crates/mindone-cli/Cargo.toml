@@ -1,0 +1,64 @@
+[package]
+name = "mindone-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MindOne 简体中文命令行客户端"
+
+[[bin]]
+name = "mindone"
+path = "src/main.rs"
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+bytes.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+curve25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+fs2.workspace = true
+futures-util.workspace = true
+hex.workspace = true
+keyring.workspace = true
+libc.workspace = true
+mindone-accounting.workspace = true
+mindone-common.workspace = true
+mindone-engine.workspace = true
+mindone-protocol.workspace = true
+mindone-sandbox.workspace = true
+rand.workspace = true
+ratatui.workspace = true
+reqwest.workspace = true
+ring.workspace = true
+same-file = "1.0"
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml = "0.9"
+sha2.workspace = true
+sysinfo.workspace = true
+subtle.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+serial_test.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

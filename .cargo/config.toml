@@ -1,0 +1,3 @@
+[target.x86_64-pc-windows-msvc]
+# Windows 一键安装包必须自包含 VC Runtime；避免干净系统因缺少 VCRUNTIME140.dll 启动失败。
+rustflags = ["-C", "target-feature=+crt-static"]

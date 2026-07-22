@@ -1,0 +1,27 @@
+pub mod api;
+pub mod app;
+pub mod auth;
+pub mod cli;
+pub mod config;
+pub mod context;
+pub mod coordinator;
+pub mod doctor;
+pub mod e2ee;
+pub mod engine;
+pub mod error;
+pub mod model;
+pub mod model_catalog;
+pub mod node;
+pub mod output;
+pub mod quota;
+pub mod serve;
+pub mod serve_proxy;
+pub mod share;
+pub mod storage;
+pub mod tui;
+pub mod vault;
+
+pub use app::execute;
+pub use cli::Cli;
+pub use error::{CliError, CliResult};
+pub use output::{CommandOutput, OutputMode};

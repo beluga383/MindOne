@@ -1,0 +1,83 @@
+name: mindone-dev
+
+services:
+  postgres:
+    image: postgres:17-bookworm@sha256:4f736ae292687621d4dbe0d499ffd024a36bd2ee7d8ca6f2ccd4c800f047b394
+    environment:
+      POSTGRES_DB: mindone_dev
+      POSTGRES_USER: mindone
+      POSTGRES_PASSWORD: ${MINDONE_DEV_POSTGRES_PASSWORD:?set a URL-safe development database password}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - mindone-dev-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mindone -d mindone_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - backend
+      - host-db
+    security_opt:
+      - no-new-privileges:true
+
+  database-migrator:
+    image: &mindone-dev-coordinator-image ${MINDONE_DEV_COORDINATOR_IMAGE:-mindone-coordinator:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: "no"
+    command:
+      - database-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &mindone-dev-coordinator-environment
+      MINDONE_ENV: development
+      MINDONE_BIND: "0.0.0.0:8787"
+      MINDONE_ALLOW_NON_LOOPBACK: "true"
+      DATABASE_URL: "postgres://mindone:${MINDONE_DEV_POSTGRES_PASSWORD:?set a URL-safe development database password}@postgres:5432/mindone_dev"
+      MINDONE_AUTH_PROVIDER: local-development
+      MINDONE_DEV_USERNAME: 本地开发用户
+      MINDONE_DEV_INITIAL_QUOTA_MICRO: "10000000"
+      MINDONE_REQUESTS_PER_MINUTE: "10000"
+      MINDONE_STANDARD_DATA_KEY: ${MINDONE_DEV_STANDARD_DATA_KEY:?set an isolated 64-character lowercase hex development key}
+      RUST_LOG: mindone_coordinator=info,tower_http=info,sqlx=warn
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+  coordinator:
+    image: *mindone-dev-coordinator-image
+    depends_on:
+      database-migrator:
+        condition: service_completed_successfully
+    environment: *mindone-dev-coordinator-environment
+    ports:
+      - "127.0.0.1:${MINDONE_COORDINATOR_HOST_PORT:-8787}:8787"
+    networks:
+      - backend
+      - edge
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+networks:
+  backend:
+    internal: true
+  edge:
+  host-db:
+
+volumes:
+  mindone-dev-postgres:

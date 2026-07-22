@@ -9,6 +9,22 @@
 *.part
 *.tmp
 *.bak
+/.tmp/
+
+# 生产部署 Secret（含 Standard/private-HMAC）与 Cloudflare 本机凭据
+/deploy/.env
+/deploy/.env.*
+!/deploy/.env.example
+/deploy/cloudflared.yml
+/deploy/cloudflared.yaml
+/deploy/*.json
+/deploy/tunnel-token
+/deploy/cloudflared-token
+/deploy/secrets/
+# 一次性质量运维材料必须位于仓库外；同时兜住常见误建目录。
+/deploy/trusted-quality-keys/
+/deploy/quality-evidence/
+/deploy/operator-staging/
 
 # 本地 MindOne 状态与敏感数据
 .mindone/
@@ -41,4 +57,3 @@ id_ed25519*
 .idea/
 .vscode/
 Thumbs.db
-

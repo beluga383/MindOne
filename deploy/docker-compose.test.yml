@@ -1,0 +1,95 @@
+name: mindone-email-test
+
+services:
+  postgres:
+    image: postgres:17-bookworm@sha256:4f736ae292687621d4dbe0d499ffd024a36bd2ee7d8ca6f2ccd4c800f047b394
+    environment:
+      POSTGRES_DB: mindone_test
+      POSTGRES_USER: mindone
+      POSTGRES_PASSWORD: ${MINDONE_DEV_POSTGRES_PASSWORD:?请设置一次性测试数据库密码}
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - mindone-email-test-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mindone -d mindone_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - backend
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8025/api/v2/messages"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - backend
+      - edge
+
+  database-migrator:
+    image: &coordinator-image ${MINDONE_DEV_COORDINATOR_IMAGE:-mindone-coordinator:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: "no"
+    command:
+      - database-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &coordinator-environment
+      MINDONE_ENV: development
+      MINDONE_BIND: 0.0.0.0:8787
+      MINDONE_ALLOW_NON_LOOPBACK: "true"
+      DATABASE_URL: postgres://mindone:${MINDONE_DEV_POSTGRES_PASSWORD:?请设置一次性测试数据库密码}@postgres:5432/mindone_test
+      MINDONE_PUBLIC_URL: ${MINDONE_PUBLIC_URL:-http://127.0.0.1:8787}
+      MINDONE_AUTH_PROVIDER: email
+      MINDONE_TOKEN_PEPPER: ${MINDONE_TOKEN_PEPPER:?请设置至少 32 字符的一次性测试 pepper}
+      MINDONE_STANDARD_DATA_KEY: ${MINDONE_DEV_STANDARD_DATA_KEY:?请设置 64 位十六进制的一次性测试数据密钥}
+      MINDONE_SMTP_HOST: mailhog
+      MINDONE_SMTP_PORT: "1025"
+      MINDONE_SMTP_USERNAME: ""
+      MINDONE_SMTP_PASSWORD: ""
+      MINDONE_SMTP_FROM_EMAIL: noreply@mindone.local
+      MINDONE_SMTP_FROM_NAME: MindOne Test
+      MINDONE_SMTP_SECURITY: plain
+      MINDONE_SMTP_ALLOW_INSECURE_DEV: "true"
+      RUST_LOG: ${RUST_LOG:-mindone_coordinator=info,sqlx=warn}
+    networks:
+      - backend
+
+  coordinator:
+    image: *coordinator-image
+    restart: unless-stopped
+    depends_on:
+      database-migrator:
+        condition: service_completed_successfully
+      mailhog:
+        condition: service_healthy
+    environment: *coordinator-environment
+    ports:
+      - "127.0.0.1:${MINDONE_COORDINATOR_HOST_PORT:-8787}:8787"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8787/ready"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 20
+    networks:
+      - backend
+      - edge
+
+networks:
+  backend:
+    internal: true
+  edge:
+
+volumes:
+  mindone-email-test-postgres:

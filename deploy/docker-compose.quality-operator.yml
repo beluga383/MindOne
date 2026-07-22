@@ -1,0 +1,81 @@
+services:
+  # 同一个仓库外只读目录也供常驻协调器加载短期签名 private hidden catalog。
+  # 未叠加本文件的基础栈只会发公开 canary，不能宣称已启用 Hidden Benchmark。
+  coordinator:
+    environment:
+      MINDONE_QUALITY_EVALUATOR_KEYS_DIR: /run/mindone-quality/trusted-keys
+      # private v2 只接受固定容器 Secret 路径；宿主源文件路径只由顶层 secret 解析。
+      MINDONE_PRIVATE_EVALUATION_HMAC_KEY_FILE: /run/secrets/mindone_private_evaluation_hmac_key
+      # 生产预算没有规格批准的默认值；叠加 overlay 时六项必须由 operator 全部明确填写。
+      MINDONE_PRIVATE_EVALUATION_CATALOG_HOURLY_LIMIT: ${MINDONE_PRIVATE_EVALUATION_CATALOG_HOURLY_LIMIT:?请明确设置 private catalog 每小时发行上限}
+      MINDONE_PRIVATE_EVALUATION_ACCOUNT_HOURLY_LIMIT: ${MINDONE_PRIVATE_EVALUATION_ACCOUNT_HOURLY_LIMIT:?请明确设置 private 账号每小时发行上限}
+      MINDONE_PRIVATE_EVALUATION_DEVICE_HOURLY_LIMIT: ${MINDONE_PRIVATE_EVALUATION_DEVICE_HOURLY_LIMIT:?请明确设置 private 设备每小时发行上限}
+      MINDONE_PRIVATE_EVALUATION_NODE_HOURLY_LIMIT: ${MINDONE_PRIVATE_EVALUATION_NODE_HOURLY_LIMIT:?请明确设置 private 节点每小时发行上限}
+      MINDONE_PRIVATE_EVALUATION_COOLDOWN_SECONDS: ${MINDONE_PRIVATE_EVALUATION_COOLDOWN_SECONDS:?请明确设置 private 重复发行冷却秒数}
+      MINDONE_PRIVATE_EVALUATION_GLOBAL_RESERVE_ENTRIES: ${MINDONE_PRIVATE_EVALUATION_GLOBAL_RESERVE_ENTRIES:?请明确设置 private 全局保留条目数}
+    volumes:
+      - type: bind
+        source: "${MINDONE_QUALITY_KEYS_HOST_DIR:?请设置仓库外受信质量公钥与私有 catalog 目录}"
+        target: /run/mindone-quality/trusted-keys
+        read_only: true
+    secrets:
+      - source: private_evaluation_hmac_key
+        target: mindone_private_evaluation_hmac_key
+
+  quality-operator:
+    # 不参与普通 up；只能由受控运维显式启用并执行一次性子命令。quality-record
+    # 不执行 private runtime prepare/claim，因此按最小权限不挂载 HMAC Secret 或预算。
+    profiles:
+      - operator
+    image: ${MINDONE_COORDINATOR_IMAGE:-mindone-coordinator:local}
+    pull_policy: never
+    restart: "no"
+    command:
+      - quality-record
+      - --help
+    depends_on:
+      database-role-init:
+        condition: service_completed_successfully
+    environment:
+      MINDONE_ENV: production
+      MINDONE_BIND: 127.0.0.1:8787
+      MINDONE_ALLOW_NON_LOOPBACK: "false"
+      DATABASE_URL: postgres://mindone_app:${MINDONE_POSTGRES_APP_PASSWORD:?请在 deploy/.env 中设置独立 runtime 数据库密码}@postgres:5432/mindone?sslmode=verify-full&sslrootcert=/run/secrets/mindone_postgres_ca
+      MINDONE_AUTH_PROVIDER: github
+      MINDONE_GITHUB_CLIENT_ID: ${MINDONE_GITHUB_CLIENT_ID:?请设置 GitHub OAuth Client ID}
+      MINDONE_TOKEN_PEPPER: ${MINDONE_TOKEN_PEPPER:?请设置至少 32 字符的令牌 pepper}
+      MINDONE_STANDARD_DATA_KEY_FILE: /run/secrets/mindone_standard_data_key
+      MINDONE_QUALITY_EVALUATOR_KEYS_DIR: /run/mindone-quality/trusted-keys
+      MINDONE_EVALUATION_DRAW_DENOMINATOR: ${MINDONE_EVALUATION_DRAW_DENOMINATOR:-8}
+      MINDONE_EVALUATION_INSTANCE_COOLDOWN_SECONDS: ${MINDONE_EVALUATION_INSTANCE_COOLDOWN_SECONDS:-60}
+      MINDONE_TRUSTED_PROXY_IPS: 127.0.0.1,::1
+      RUST_LOG: ${RUST_LOG:-mindone_coordinator=info,tower_http=info,sqlx=warn}
+    volumes:
+      - type: bind
+        source: "${MINDONE_QUALITY_KEYS_HOST_DIR:?请设置仓库外受信质量公钥与私有 catalog 目录}"
+        target: /run/mindone-quality/trusted-keys
+        read_only: true
+      - type: bind
+        source: "${MINDONE_QUALITY_EVIDENCE_HOST_DIR:?请设置仓库外质量 evidence 暂存目录}"
+        target: /run/mindone-quality/evidence
+        read_only: true
+    networks:
+      - backend
+    secrets:
+      - source: postgres_ca
+        target: mindone_postgres_ca
+      - source: standard_data_key
+        target: mindone_standard_data_key
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+secrets:
+  private_evaluation_hmac_key:
+    # 必须指向仓库外（或 Git/Docker 均排除的 deploy/secrets）权限 0600 的独立文件。
+    file: ${MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE:?请设置 private v2 独立 HMAC Secret 宿主文件路径}

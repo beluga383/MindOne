@@ -1,0 +1,61 @@
+# MindOne v1.0.0 dependency policy. Licenses are an explicit reviewed allowlist;
+# an unknown, unlicensed, or merely OSI-marked license is not accepted implicitly.
+[graph]
+all-features = true
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+# 安全告警不设本地豁免；依赖升级必须消除或由后续显式审计变更说明。
+ignore = []
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+exceptions = []
+
+[licenses.private]
+ignore = false
+registries = []
+
+[bans]
+multiple-versions = "warn"
+# Cargo workspace/path dependencies do not carry registry versions. Registry
+# and git provenance is enforced independently by [sources].
+wildcards = "allow"
+highlight = "all"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []

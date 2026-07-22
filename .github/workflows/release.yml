@@ -1,0 +1,475 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已存在并指向当前提交的 v* 标签
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_AUDIT_VERSION: "0.22.2"
+
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  validate-tag:
+    name: 验证发行标签
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: 检出源码与标签
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 验证标签来自 main 且与 Cargo 版本一致
+        id: version
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$DISPATCH_TAG"
+          fi
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          git rev-parse --verify "refs/tags/$tag" >/dev/null
+          tag_commit=$(git rev-list -n 1 "$tag")
+          test "$tag_commit" = "$(git rev-parse HEAD)"
+          git fetch --no-tags origin \
+            '+refs/heads/main:refs/remotes/origin/main'
+          git merge-base --is-ancestor "$tag_commit" refs/remotes/origin/main
+          workspace_version=$(awk '
+            $0 == "[workspace.package]" { section=1; next }
+            /^\[/ { section=0 }
+            section && $1 == "version" {
+              value=$3
+              gsub(/"/, "", value)
+              print value
+              exit
+            }
+          ' Cargo.toml)
+          test -n "$workspace_version"
+          test "${tag#v}" = "$workspace_version"
+          prerelease=false
+          version_without_build="${tag#v}"
+          version_without_build="${version_without_build%%+*}"
+          if [[ "$version_without_build" == *-* ]]; then
+            prerelease=true
+          fi
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'prerelease=%s\n' "$prerelease" >> "$GITHUB_OUTPUT"
+
+  critical-ci-gates:
+    name: 复用同一提交的完整 CI 门禁
+    needs: validate-tag
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  verify-source:
+    name: 发行前复验源码、PostgreSQL 与安全门禁
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: mindone_release_test
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mindone_release_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgres://postgres@127.0.0.1:5432/mindone_release_test
+    steps:
+      - name: 检出待发行源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: release-verification
+
+      - name: 检查格式
+        run: cargo fmt --all -- --check
+
+      - name: 验证声明的最低 Rust 版本 1.88
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 check --locked --workspace --all-targets --all-features
+
+      - name: 严格运行 Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: 运行工作区测试
+        run: cargo test --locked --workspace --all-features
+
+      - name: 运行 PostgreSQL 迁移与完整 API 集成测试
+        run: cargo test --locked -p mindone-coordinator --test postgres_integration -- --nocapture
+
+      - name: 安装并运行 RustSec 审计
+        run: |
+          cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+          cargo audit
+
+      - name: 验证锁文件可解析且不漂移
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: 执行 cargo-deny 发行门禁
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories licenses bans sources
+
+      - name: 扫描完整 Git 历史中的 Secret
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: 打包 ${{ matrix.target }}
+    needs: [validate-tag, verify-source, critical-ci-gates]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            binary: mindone
+            archive: tar.gz
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: mindone
+            archive: tar.gz
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: mindone
+            archive: tar.gz
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            binary: mindone
+            archive: tar.gz
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: mindone.exe
+            archive: zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 安装目标工具链
+        run: rustup target add ${{ matrix.target }}
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: 构建发行 CLI
+        run: cargo build --locked --release -p mindone-cli --target ${{ matrix.target }}
+
+      - name: 验证 Windows 发行物自包含且保留 Job Object
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          ./scripts/verify-windows-self-contained.ps1
+          -Binary "target/${{ matrix.target }}/release/mindone.exe"
+
+      - name: 可选 Apple Developer ID 代码签名
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/mindone"
+          status="$RUNNER_TEMP/${{ matrix.target }}.signing.txt"
+          if [[ -z "$MACOS_CERTIFICATE_P12_BASE64" && -z "$MACOS_CERTIFICATE_PASSWORD" && -z "$MACOS_SIGNING_IDENTITY" ]]; then
+            printf '%s\n' \
+              '${{ matrix.target }}：未做 Apple 代码签名；正式公测需 Developer ID Application 证书并完成 notarization。' \
+              > "$status"
+            exit 0
+          fi
+          if [[ -z "$MACOS_CERTIFICATE_P12_BASE64" || -z "$MACOS_CERTIFICATE_PASSWORD" || -z "$MACOS_SIGNING_IDENTITY" ]]; then
+            echo 'Apple 签名 Secret 只配置了一部分，拒绝产生状态不明的发行包。' >&2
+            exit 1
+          fi
+          certificate="$RUNNER_TEMP/mindone-signing.p12"
+          keychain="$RUNNER_TEMP/mindone-signing.keychain-db"
+          keychain_password=$(openssl rand -hex 24)
+          cleanup_signing() {
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -f "$certificate"
+          }
+          trap cleanup_signing EXIT
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 -D > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain"
+          codesign --force --options runtime --timestamp --keychain "$keychain" \
+            --sign "$MACOS_SIGNING_IDENTITY" "$binary"
+          codesign --verify --strict --verbose=2 "$binary"
+          printf '%s\n' '${{ matrix.target }}：已使用 Apple Developer ID 完成 hardened runtime 代码签名；notarization 仍需单独验证。' \
+            > "$status"
+
+      - name: 可选 Windows Authenticode 代码签名
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $binary = "target/${{ matrix.target }}/release/mindone.exe"
+          $status = Join-Path $env:RUNNER_TEMP "${{ matrix.target }}.signing.txt"
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_BASE64) -and
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            Set-Content -LiteralPath $status -Encoding UTF8 -Value "${{ matrix.target }}：未做 Windows Authenticode 签名；正式公测需可信代码签名证书。"
+            exit 0
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw "Windows 签名 Secret 只配置了一部分，拒绝产生状态不明的发行包。"
+          }
+          $certificate = Join-Path $env:RUNNER_TEMP "mindone-signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes(
+              $certificate,
+              [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64)
+            )
+            $signTool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+            if ($null -eq $signTool) {
+              $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
+            }
+            if ($null -eq $signTool) {
+              throw "找不到 Windows SDK signtool.exe"
+            }
+            $signToolPath = if ($signTool.PSObject.Properties.Name -contains "Source") { $signTool.Source } else { $signTool.FullName }
+            & $signToolPath sign /fd SHA256 /td SHA256 /tr https://timestamp.digicert.com /f $certificate /p $env:WINDOWS_CERTIFICATE_PASSWORD $binary
+            if ($LASTEXITCODE -ne 0) { throw "signtool 签名失败" }
+            & $signToolPath verify /pa /v $binary
+            if ($LASTEXITCODE -ne 0) { throw "signtool 验证失败" }
+            Set-Content -LiteralPath $status -Encoding UTF8 -Value "${{ matrix.target }}：已完成并验证 Windows Authenticode 签名。"
+          }
+          finally {
+            Remove-Item -LiteralPath $certificate -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: 记录 Linux 签名适用范围
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          printf '%s\n' \
+            '${{ matrix.target }}：无平台代码签名；聚合 SHA-256 清单将由 GitHub OIDC/Sigstore 真实签名。' \
+            > "$RUNNER_TEMP/${{ matrix.target }}.signing.txt"
+
+      - name: 打包 Unix 发行物
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$RUNNER_TEMP/package-${{ matrix.target }}"
+          mkdir -p "$package" dist
+          cp "target/${{ matrix.target }}/release/mindone" "$package/mindone"
+          cp LICENSE "$package/LICENSE"
+          cp "$RUNNER_TEMP/${{ matrix.target }}.signing.txt" "$package/CODE_SIGNING.txt"
+          tar -C "$package" -czf "dist/mindone-${{ matrix.target }}.tar.gz" \
+            mindone LICENSE CODE_SIGNING.txt
+          cp "$RUNNER_TEMP/${{ matrix.target }}.signing.txt" \
+            "dist/${{ matrix.target }}.signing.txt"
+
+      - name: 打包 Windows 发行物
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP "package-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $package, dist -Force | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/mindone.exe" "$package/mindone.exe"
+          Copy-Item LICENSE "$package/LICENSE"
+          Copy-Item "$env:RUNNER_TEMP/${{ matrix.target }}.signing.txt" "$package/CODE_SIGNING.txt"
+          Compress-Archive -Path "$package/*" -DestinationPath "dist/mindone-${{ matrix.target }}.zip" -CompressionLevel Optimal
+          Copy-Item "$env:RUNNER_TEMP/${{ matrix.target }}.signing.txt" "dist/${{ matrix.target }}.signing.txt"
+
+      - name: 上传待聚合发行物
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release-assets:
+    name: 生成 SBOM、校验清单与 provenance
+    needs: [validate-tag, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 下载全部平台产物
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: 聚合代码签名状态
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_files=(release-assets/*.signing.txt)
+          test -e "${status_files[0]}"
+          {
+            echo 'MindOne 平台代码签名状态'
+            echo
+            for status in "${status_files[@]}"; do
+              cat "$status"
+            done
+            echo
+            echo 'checksums.sha256 另由 GitHub Actions OIDC 身份通过 Sigstore 签名；这不等同于 Apple/Windows 平台代码签名。'
+          } > release-assets/SIGNING_STATUS.txt
+          rm -- "${status_files[@]}"
+          printf '%s\n' '${{ needs.validate-tag.outputs.tag }}' > release-assets/release-version.txt
+
+      - name: 生成 SPDX JSON SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: release-assets/mindone-sbom.spdx.json
+          upload-artifact: false
+
+      - name: 生成发行说明与 SHA-256 清单
+        shell: bash
+        env:
+          IS_PRERELEASE: ${{ needs.validate-tag.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## 发布通道'
+            echo
+            if [[ "$IS_PRERELEASE" == true ]]; then
+              echo '**预发布通道**：标签带有 SemVer 预发布后缀，不会进入 GitHub `latest` 稳定通道。'
+            else
+              echo '**稳定通道**：正式 SemVer 标签会进入 GitHub `latest`，供无版本参数的安装器使用。'
+            fi
+            echo
+            echo '**平台信任边界**：Apple/Windows 原生代码签名取决于发行 Secret；macOS notarization 尚未接入。具体状态以每个包内的 `CODE_SIGNING.txt` 和本页 `SIGNING_STATUS.txt` 为准。版本通道不代表这些平台签名已经存在。'
+            echo
+            echo '## 安装与完整性'
+            echo
+            echo '安装器会按平台选择发行包，并严格核对 `checksums.sha256`。'
+            echo '本次发行同时附带 SPDX SBOM、Sigstore 校验清单签名与 GitHub provenance attestation。'
+            echo
+            echo '## 平台代码签名'
+            echo
+            cat release-assets/SIGNING_STATUS.txt
+          } > release-assets/RELEASE_NOTES.md
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f \
+              ! -name checksums.sha256 \
+              ! -name checksums.sigstore.json \
+              -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              | sed 's#  \./#  #' > checksums.sha256
+          )
+
+      - name: 安装 Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: 使用 GitHub OIDC 真实签名并验证校验清单
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle release-assets/checksums.sigstore.json \
+            release-assets/checksums.sha256
+          cosign verify-blob \
+            --bundle release-assets/checksums.sigstore.json \
+            --certificate-identity "https://github.com/${GITHUB_WORKFLOW_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            release-assets/checksums.sha256
+
+      - name: 为平台压缩包生成 GitHub provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            release-assets/mindone-*.tar.gz
+            release-assets/mindone-*.zip
+
+      - name: 上传已签名发行目录
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mindone-release-assets
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: 创建 GitHub Release
+    needs: [validate-tag, release-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: 下载已签名发行目录
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mindone-release-assets
+          path: release-assets
+
+      - name: 按 SemVer 通道创建 GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.validate-tag.outputs.tag }}
+          IS_PRERELEASE: ${{ needs.validate-tag.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          title="MindOne $RELEASE_TAG"
+          channel_args=(--latest)
+          if [[ "$IS_PRERELEASE" == true ]]; then
+            title="$title 预发布"
+            channel_args=(--prerelease --latest=false)
+          fi
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --verify-tag \
+            "${channel_args[@]}" \
+            --title "$title" \
+            --notes-file release-assets/RELEASE_NOTES.md

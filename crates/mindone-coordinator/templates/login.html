@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>登录 - MindOne</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .container { background: white; border-radius: 12px; padding: 40px; max-width: 420px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+        h1 { color: #333; margin-bottom: 10px; font-size: 28px; }
+        .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; color: #333; font-weight: 500; font-size: 14px; }
+        input { width: 100%; padding: 12px 15px; border: 2px solid #e1e8ed; border-radius: 8px; font-size: 14px; transition: border-color 0.3s; }
+        input:focus { outline: none; border-color: #667eea; }
+        button { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
+        button:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4); }
+        button:active { transform: translateY(0); }
+        .footer { margin-top: 25px; text-align: center; color: #666; font-size: 14px; }
+        .footer a { color: #667eea; text-decoration: none; font-weight: 600; }
+        .footer a:hover { text-decoration: underline; }
+        .message { padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; display: none; }
+        .message.error { background: #fee; color: #c33; border: 1px solid #fcc; }
+        .message.success { background: #efe; color: #3a3; border: 1px solid #cfc; }
+        .device-mode { background: #e3f2fd; border: 2px solid #2196f3; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+        .device-mode p { color: #1565c0; font-size: 13px; line-height: 1.6; }
+        .device-mode strong { color: #0d47a1; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>登录 MindOne</h1>
+        <p class="subtitle">公益 AI 算力共享网络</p>
+
+        <div id="deviceMode" class="device-mode">
+            <p><strong>设备绑定模式</strong></p>
+            <p>仅输入<strong>你自己终端</strong>刚显示的验证码。如果验证码不一致或链接由他人发来，请立即停止，否则可能授权他人的设备。</p>
+        </div>
+
+        <div id="message" class="message"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="email">邮箱</label>
+                <input type="email" id="email" name="email" required placeholder="your@email.com" autofocus>
+            </div>
+
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input type="password" id="password" name="password" required placeholder="输入密码">
+            </div>
+
+            <div class="form-group">
+                <label for="user_code">终端验证码</label>
+                <input type="text" id="user_code" name="user_code" required
+                       minlength="12" maxlength="14" autocomplete="one-time-code"
+                       placeholder="例如 ABCD-EF12-3456">
+            </div>
+
+            <button type="submit">登录</button>
+        </form>
+
+        <div class="footer">
+            还没有账户？<a href="/auth/register">立即注册</a>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById('message');
+            msg.style.display = 'none';
+
+            const formData = {
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value,
+                user_code: document.getElementById('user_code').value,
+            };
+
+            try {
+                const res = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData),
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    msg.className = 'message success';
+                    msg.textContent = data.message || '身份验证成功！请关闭浏览器，回到终端继续操作。';
+                    msg.style.display = 'block';
+                    document.getElementById('loginForm').reset();
+                } else {
+                    msg.className = 'message error';
+                    msg.textContent = data.error?.message || data.error || '登录失败，请检查邮箱和密码';
+                    msg.style.display = 'block';
+                }
+            } catch (error) {
+                msg.className = 'message error';
+                msg.textContent = '网络错误，请检查连接';
+                msg.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

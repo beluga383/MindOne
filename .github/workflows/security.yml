@@ -1,0 +1,68 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_AUDIT_VERSION: "0.22.2"
+
+jobs:
+  rustsec:
+    name: RustSec 漏洞审计
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 缓存 Cargo 工具与构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-all-crates: true
+          key: cargo-audit
+
+      - name: 安装 cargo-audit
+        run: cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+
+      - name: 审计 Cargo.lock
+        run: cargo audit
+
+  dependency-policy:
+    name: 依赖漏洞、许可证、来源与重复依赖检查
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 验证锁文件可解析且不漂移
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: 按 deny.toml 检查 advisories、licenses、bans 与来源
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          rust-version: "1.88.0"
+          arguments: --all-features --locked --config deny.toml
+          command: check
+          command-arguments: advisories licenses bans sources
+
+  secret-scan:
+    name: Git 历史 Secret 扫描
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出完整历史
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 运行 Gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

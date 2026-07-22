@@ -1,0 +1,70 @@
+services:
+  coordinator:
+    # 公网模式不发布 origin；只有同一隔离网络的专用 connector 能直连。
+    ports: !reset []
+    environment:
+      MINDONE_TRUSTED_PROXY_IPS: 172.31.255.3
+    # 完全替换基础 Compose 的 edge 网络：公网模式下 origin 与 connector
+    # 只共享 tunnel_edge；协调器通过独立网络访问 GitHub OAuth。
+    networks: !override
+      backend: {}
+      tunnel_edge:
+        ipv4_address: 172.31.255.2
+      coordinator_egress:
+        gw_priority: 1
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.7.2@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d
+    restart: unless-stopped
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    command:
+      - tunnel
+      - --loglevel
+      - info
+      - --metrics
+      - 127.0.0.1:2000
+      - run
+      - --token-file
+      - /run/secrets/cloudflared_token
+    healthcheck:
+      test:
+        - CMD
+        - cloudflared
+        - tunnel
+        - --metrics
+        - 127.0.0.1:2000
+        - ready
+      interval: 10s
+      timeout: 3s
+      start_period: 15s
+      retries: 6
+    secrets:
+      - source: cloudflared_token
+        target: cloudflared_token
+    networks:
+      tunnel_edge:
+        ipv4_address: 172.31.255.3
+      cloudflare_egress:
+        gw_priority: 1
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+networks:
+  tunnel_edge:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.255.0/29
+  cloudflare_egress:
+  coordinator_egress:
+
+secrets:
+  cloudflared_token:
+    file: ${MINDONE_CLOUDFLARED_TOKEN_FILE:?请设置 Dashboard 提供的专用 connector token 文件路径}

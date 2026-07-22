@@ -1,0 +1,1748 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  MINDONE_EXPECTED_MIGRATION_VERSION: "39"
+
+jobs:
+  quality:
+    name: 格式、Clippy 与测试
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: 检查格式
+        run: cargo fmt --all -- --check
+
+      - name: 验证 Unix 安装器 URL 安全边界
+        run: sh scripts/install-url-validation-smoke.sh
+
+      - name: 验证开发 smoke 凭据与构建上下文安全边界
+        run: sh scripts/mvp-dev-smoke-contract-test.sh
+
+      - name: 验证声明的最低 Rust 版本 1.88
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 check --locked --workspace --all-targets --all-features
+
+      - name: 严格运行 Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: 运行工作区测试
+        run: cargo test --locked --workspace --all-features
+
+  postgres-integration:
+    name: PostgreSQL 迁移与 API 集成
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: mindone_test
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mindone_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgres://postgres@127.0.0.1:5432/mindone_test
+      MINDONE_REQUIRE_POSTGRES_TESTS: "1"
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: postgres-integration
+
+      - name: 确认 PostgreSQL 就绪
+        run: pg_isready -h 127.0.0.1 -p 5432 -U postgres -d mindone_test
+
+      - name: 运行迁移与完整 API 集成测试
+        run: cargo test --locked -p mindone-coordinator --test postgres_integration -- --nocapture
+
+      - name: 运行权威账本链头 PostgreSQL 集成测试
+        run: cargo test --locked -p mindone-coordinator --test ledger_heads -- --nocapture
+
+      - name: 运行账本完整性 PostgreSQL 集成测试
+        run: cargo test --locked -p mindone-coordinator --test ledger_integrity -- --nocapture
+
+      - name: 运行 0023 到 0024 账本升级门禁
+        run: cargo test --locked -p mindone-coordinator --test ledger_migration -- --nocapture
+
+      - name: 运行最小权限数据库角色门禁
+        run: cargo test --locked -p mindone-coordinator --test database_role -- --nocapture
+
+      - name: 运行 runtime schema 漂移与遮蔽门禁
+        run: cargo test --locked -p mindone-coordinator --test runtime_schema -- --nocapture
+
+      - name: 运行 v31 设备绑定、私有 HMAC 与预算 schema 门禁
+        run: cargo test --locked -p mindone-coordinator --test schema_v31 -- --nocapture
+
+      - name: 运行 v32 物理计费合同 schema 门禁
+        run: cargo test --locked -p mindone-coordinator --test schema_v32 -- --nocapture
+
+      - name: 运行 v33 计费 profile 供应 schema 门禁
+        run: cargo test --locked -p mindone-coordinator --test schema_v33 -- --nocapture
+
+      - name: 运行 v34 当前计费快照 cutover schema 门禁
+        run: cargo test --locked -p mindone-coordinator --test schema_v34 -- --nocapture
+
+      - name: 运行 v35 Standard SSE 事件 schema 门禁
+        run: cargo test --locked -p mindone-coordinator --test schema_v35 -- --nocapture
+
+      - name: 运行 v36 SLA 审计排除 schema 门禁
+        run: cargo test --locked -p mindone-coordinator --test schema_v36 -- --nocapture
+
+      - name: 运行 v37 邮箱 Device Flow schema 门禁
+        run: cargo test --locked -p mindone-coordinator --test schema_v37 -- --nocapture
+
+      - name: 运行 v38 三档速度 schema 门禁
+        run: cargo test --locked -p mindone-coordinator --test schema_v38 -- --nocapture
+
+      - name: 运行 v39 推理 API Key schema 门禁
+        run: cargo test --locked -p mindone-coordinator --test schema_v39 -- --nocapture
+
+      - name: 运行 Router 合同门禁
+        run: cargo test --locked -p mindone-coordinator --test router -- --nocapture
+
+      - name: 核对完整迁移集合
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration_state=$(psql --no-psqlrc "$DATABASE_URL" \
+            --tuples-only --no-align --field-separator='|' \
+            --command 'SELECT COUNT(*)::bigint,MIN(version),MAX(version),COALESCE(BOOL_AND(success),FALSE) FROM _sqlx_migrations')
+          expected_migration_state="${MINDONE_EXPECTED_MIGRATION_VERSION}|1|${MINDONE_EXPECTED_MIGRATION_VERSION}|t"
+          test "$migration_state" = "$expected_migration_state"
+
+  production-deploy-security:
+    name: 生产 Compose TLS 与 connector 隔离门禁
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: quality
+    env:
+      COMPOSE_PROJECT_NAME: mindone-deploy-security-ci
+      MINDONE_POSTGRES_PASSWORD: mindone-ci-postgres-password-32-bytes
+      MINDONE_POSTGRES_APP_PASSWORD: mindone-ci-app-password-32-bytes
+      MINDONE_GITHUB_CLIENT_ID: mindone-ci-github-client-id
+      MINDONE_TOKEN_PEPPER: mindone-ci-token-pepper-at-least-32-bytes
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 准备门禁临时路径
+        shell: bash
+        run: |
+          printf 'MINDONE_POSTGRES_TLS_DIR=%s\n' \
+            "$RUNNER_TEMP/mindone-postgres-tls" >> "$GITHUB_ENV"
+          printf 'MINDONE_CLOUDFLARED_TOKEN_FILE=%s\n' \
+            "$RUNNER_TEMP/mindone-cloudflared-token" >> "$GITHUB_ENV"
+          printf 'MINDONE_STANDARD_DATA_KEY_FILE=%s\n' \
+            "$RUNNER_TEMP/mindone-standard-data-key" >> "$GITHUB_ENV"
+          printf 'MINDONE_QUALITY_KEYS_HOST_DIR=%s\n' \
+            "$RUNNER_TEMP/mindone-quality-trusted-keys" >> "$GITHUB_ENV"
+          printf 'MINDONE_QUALITY_EVIDENCE_HOST_DIR=%s\n' \
+            "$RUNNER_TEMP/mindone-quality-evidence" >> "$GITHUB_ENV"
+          printf 'MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE=%s\n' \
+            "$RUNNER_TEMP/mindone-private-evaluation-hmac-key" >> "$GITHUB_ENV"
+          printf '%s\n' \
+            'MINDONE_PRIVATE_EVALUATION_CATALOG_HOURLY_LIMIT=101' \
+            'MINDONE_PRIVATE_EVALUATION_ACCOUNT_HOURLY_LIMIT=102' \
+            'MINDONE_PRIVATE_EVALUATION_DEVICE_HOURLY_LIMIT=103' \
+            'MINDONE_PRIVATE_EVALUATION_NODE_HOURLY_LIMIT=104' \
+            'MINDONE_PRIVATE_EVALUATION_COOLDOWN_SECONDS=105' \
+            'MINDONE_PRIVATE_EVALUATION_GLOBAL_RESERVE_ENTRIES=106' \
+            >> "$GITHUB_ENV"
+
+      - name: 生成隔离的 PostgreSQL TLS 材料
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/generate-postgres-tls.sh "$MINDONE_POSTGRES_TLS_DIR"
+          install -m 0600 /dev/null "$MINDONE_CLOUDFLARED_TOKEN_FILE"
+          install -m 0600 /dev/null "$MINDONE_STANDARD_DATA_KEY_FILE"
+          install -m 0600 /dev/null "$MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE"
+          install -d -m 0700 \
+            "$MINDONE_QUALITY_KEYS_HOST_DIR" \
+            "$MINDONE_QUALITY_EVIDENCE_HOST_DIR"
+          openssl rand -hex 32 > "$MINDONE_STANDARD_DATA_KEY_FILE"
+          {
+            printf '%s' 'mindone-private-hidden-hmac-v1:'
+            openssl rand -hex 32
+          } > "$MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE"
+          openssl verify -purpose sslserver \
+            -CAfile "$MINDONE_POSTGRES_TLS_DIR/ca.crt" \
+            "$MINDONE_POSTGRES_TLS_DIR/server.crt"
+          test "$(stat -c '%a' "$MINDONE_POSTGRES_TLS_DIR/server.key")" = "600"
+
+      - name: 静态验证基础与公网 overlay 合同
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$MINDONE_POSTGRES_PASSWORD" != "$MINDONE_POSTGRES_APP_PASSWORD"
+          docker compose --env-file /dev/null \
+            -f deploy/docker-compose.yml config --format json |
+          jq -e '
+            (.services | keys
+              == ["coordinator", "database-migrator", "database-role-init", "postgres"]) and
+            ((.services.coordinator.ports | length) == 1) and
+            (all(.services.coordinator.ports[];
+              .host_ip == "127.0.0.1" and
+              .target == 8787 and
+              .published == "18787" and
+              .protocol == "tcp")) and
+            ((.services.coordinator.networks | keys) == ["backend", "edge"]) and
+            (.services.coordinator.environment.MINDONE_TRUSTED_PROXY_IPS
+              == "127.0.0.1,::1") and
+            (.services.coordinator.environment.DATABASE_URL
+              | startswith("postgres://mindone_app:") and
+                (contains("postgres://mindone:") | not) and
+                contains("sslmode=verify-full") and
+                contains("sslrootcert=/run/secrets/mindone_postgres_ca")) and
+            (.services["database-migrator"].environment.DATABASE_URL
+              | startswith("postgres://mindone:") and
+                (contains("mindone_app") | not) and
+                contains("sslmode=verify-full")) and
+            (.services["database-role-init"].environment.PGSSLMODE == "verify-full") and
+            (.services["database-role-init"].environment.PGSSLROOTCERT
+              == "/run/secrets/mindone_postgres_ca") and
+            (.services["database-role-init"].environment.MINDONE_POSTGRES_APP_PASSWORD
+              != .services["database-role-init"].environment.PGPASSWORD) and
+            ((.services.postgres.ports // []) | length == 0) and
+            ((.services.postgres.networks | keys) == ["backend"]) and
+            (.networks.backend.internal == true) and
+            ((.networks.edge.internal // false) == false)
+          ' >/dev/null
+          config_json="$RUNNER_TEMP/mindone-compose-overlay.json"
+          docker compose --env-file /dev/null \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.cloudflared.yml \
+            config --format json > "$config_json"
+          jq -e '
+            (.services | keys
+              == ["cloudflared", "coordinator", "database-migrator",
+                  "database-role-init", "postgres"]) and
+            ((.services.coordinator.ports // []) | length == 0) and
+            (.services.coordinator.environment.MINDONE_TRUSTED_PROXY_IPS == "172.31.255.3") and
+            (.services.coordinator.networks.tunnel_edge.ipv4_address == "172.31.255.2") and
+            (.services.coordinator.networks.coordinator_egress.gw_priority == 1) and
+            ((.services.coordinator.networks | keys)
+              == ["backend", "coordinator_egress", "tunnel_edge"]) and
+            ((.services.cloudflared.networks | keys)
+              == ["cloudflare_egress", "tunnel_edge"]) and
+            (.services.coordinator.environment.DATABASE_URL
+              | startswith("postgres://mindone_app:") and
+                (contains("postgres://mindone:") | not) and
+                contains("sslmode=verify-full") and
+                contains("sslrootcert=/run/secrets/mindone_postgres_ca")) and
+            (.services.coordinator.depends_on["database-migrator"].condition
+              == "service_completed_successfully") and
+            (.services.coordinator.depends_on["database-role-init"].condition
+              == "service_completed_successfully") and
+            (.services.coordinator.environment.MINDONE_STANDARD_DATA_KEY_FILE
+              == "/run/secrets/mindone_standard_data_key") and
+            ([.services.coordinator.secrets[].target]
+              | index("mindone_standard_data_key") != null) and
+            (.services["database-migrator"].image == .services.coordinator.image) and
+            (.services["database-migrator"].restart == "no") and
+            (.services["database-migrator"].command == ["database-migrate"]) and
+            (.services["database-migrator"].depends_on.postgres.condition
+              == "service_healthy") and
+            (.services["database-migrator"].environment.DATABASE_URL
+              | startswith("postgres://mindone:") and
+                (contains("mindone_app") | not) and
+                contains("sslmode=verify-full") and
+                contains("sslrootcert=/run/secrets/mindone_postgres_ca")) and
+            (.services["database-migrator"].user == "10001:10001") and
+            (.services["database-migrator"].read_only == true) and
+            (.services["database-migrator"].cap_drop == ["ALL"]) and
+            ((.services["database-migrator"].ports // []) | length == 0) and
+            ((.services["database-migrator"].networks | keys) == ["backend"]) and
+            (.services["database-role-init"].image
+              | test("@sha256:[0-9a-f]{64}$")) and
+            (.services["database-role-init"].restart == "no") and
+            (.services["database-role-init"].depends_on["database-migrator"].condition
+              == "service_completed_successfully") and
+            (.services["database-role-init"].entrypoint ==
+              ["/bin/sh", "/usr/local/lib/mindone/postgres-ensure-runtime-role.sh"]) and
+            (.services["database-role-init"].environment.PGUSER == "mindone") and
+            (.services["database-role-init"].environment.PGSSLMODE == "verify-full") and
+            (.services["database-role-init"].environment.PGSSLROOTCERT
+              == "/run/secrets/mindone_postgres_ca") and
+            ((.services["database-role-init"].environment.MINDONE_POSTGRES_APP_PASSWORD
+              | length) >= 32) and
+            (.services["database-role-init"].environment.MINDONE_POSTGRES_APP_PASSWORD
+              != .services["database-role-init"].environment.PGPASSWORD) and
+            (.services["database-role-init"].user == "postgres") and
+            (.services["database-role-init"].read_only == true) and
+            (.services["database-role-init"].cap_drop == ["ALL"]) and
+            ((.services["database-role-init"].ports // []) | length == 0) and
+            ((.services["database-role-init"].networks | keys) == ["backend"]) and
+            ([.services["database-role-init"].secrets[].target]
+              == ["mindone_postgres_ca"]) and
+            ([.services["database-role-init"].volumes[]
+              | select(.type == "bind"
+                  and .target == "/usr/local/lib/mindone/postgres-ensure-runtime-role.sh"
+                  and .read_only == true)] | length == 1) and
+            ((.services.postgres.ports // []) | length == 0) and
+            (.services.postgres.image | test("@sha256:[0-9a-f]{64}$")) and
+            (.services.postgres.command | index("ssl=on") != null) and
+            (.services.postgres.command
+              | index("hba_file=/usr/local/etc/postgresql/mindone-pg_hba.conf") != null) and
+            ((.services.cloudflared.ports // []) | length == 0) and
+            (.services.cloudflared.image | test("@sha256:[0-9a-f]{64}$")) and
+            (.services.cloudflared.networks.tunnel_edge.ipv4_address == "172.31.255.3") and
+            (.services.cloudflared.networks.cloudflare_egress.gw_priority == 1) and
+            (.services.cloudflared.command ==
+              ["tunnel", "--loglevel", "info", "--metrics", "127.0.0.1:2000",
+               "run", "--token-file", "/run/secrets/cloudflared_token"]) and
+            (.services.cloudflared.healthcheck.test ==
+              ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]) and
+            (.services.cloudflared | has("environment") | not) and
+            ([.services.cloudflared.secrets[].target] == ["cloudflared_token"]) and
+            (.services.cloudflared.read_only == true) and
+            (.services.cloudflared.cap_drop == ["ALL"]) and
+            (.services.cloudflared.security_opt == ["no-new-privileges:true"]) and
+            (.networks | keys
+              == ["backend", "cloudflare_egress", "coordinator_egress", "tunnel_edge"]) and
+            (.networks.backend.internal == true) and
+            (.networks.tunnel_edge.internal == true) and
+            (.networks.tunnel_edge.ipam.config == [{"subnet": "172.31.255.0/29"}]) and
+            ((.networks.coordinator_egress.internal // false) == false) and
+            ((.networks.cloudflare_egress.internal // false) == false)
+          ' "$config_json"
+
+          operator_config_json="$RUNNER_TEMP/mindone-compose-quality-operator.json"
+          scripts/validate-private-v2-compose.sh
+          docker compose --env-file /dev/null \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.quality-operator.yml \
+            --profile operator config --format json > "$operator_config_json"
+          jq -e \
+            --arg keys_source "$MINDONE_QUALITY_KEYS_HOST_DIR" \
+            --arg evidence_source "$MINDONE_QUALITY_EVIDENCE_HOST_DIR" \
+            --arg hmac_source "$MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE" '
+            (.services | keys
+              == ["coordinator", "database-migrator", "database-role-init",
+                  "postgres", "quality-operator"]) and
+            (.services["quality-operator"].profiles == ["operator"]) and
+            (.services["quality-operator"].image == .services.coordinator.image) and
+            (.services["quality-operator"].pull_policy == "never") and
+            (.services["quality-operator"].restart == "no") and
+            (.services["quality-operator"].command == ["quality-record", "--help"]) and
+            (.services["quality-operator"].user == "10001:10001") and
+            (.services["quality-operator"].read_only == true) and
+            (.services["quality-operator"].cap_drop == ["ALL"]) and
+            (.services["quality-operator"].security_opt
+              == ["no-new-privileges:true"]) and
+            ((.services["quality-operator"].ports // []) | length == 0) and
+            ((.services["quality-operator"].networks | keys) == ["backend"]) and
+            (.services["quality-operator"].depends_on["database-role-init"].condition
+              == "service_completed_successfully") and
+            (.services["quality-operator"].environment.DATABASE_URL
+              | startswith("postgres://mindone_app:") and
+                (contains("postgres://mindone:") | not) and
+                contains("sslmode=verify-full") and
+                contains("sslrootcert=/run/secrets/mindone_postgres_ca")) and
+            (.services["quality-operator"].environment.MINDONE_BIND == "127.0.0.1:8787") and
+            (.services["quality-operator"].environment.MINDONE_ALLOW_NON_LOOPBACK == "false") and
+            (.services["quality-operator"].environment.MINDONE_TRUSTED_PROXY_IPS
+              == "127.0.0.1,::1") and
+            (.services["quality-operator"].environment.MINDONE_QUALITY_EVALUATOR_KEYS_DIR
+              == "/run/mindone-quality/trusted-keys") and
+            ((.services["quality-operator"].environment
+              | keys | map(startswith("MINDONE_PRIVATE_EVALUATION_")) | any) | not) and
+            ([.services["quality-operator"].secrets[].target] | sort
+              == ["mindone_postgres_ca", "mindone_standard_data_key"]) and
+            ((.services["quality-operator"].volumes | length) == 2) and
+            ([.services["quality-operator"].volumes[]
+              | select(.type == "bind"
+                  and .source == $keys_source
+                  and .target == "/run/mindone-quality/trusted-keys"
+                  and .read_only == true)] | length == 1) and
+            ([.services["quality-operator"].volumes[]
+              | select(.type == "bind"
+                  and .source == $evidence_source
+                  and .target == "/run/mindone-quality/evidence"
+                  and .read_only == true)] | length == 1) and
+            (.services.coordinator.environment.MINDONE_QUALITY_EVALUATOR_KEYS_DIR
+              == "/run/mindone-quality/trusted-keys") and
+            (.services.coordinator.environment.MINDONE_PRIVATE_EVALUATION_HMAC_KEY_FILE
+              == "/run/secrets/mindone_private_evaluation_hmac_key") and
+            (.services.coordinator.environment.MINDONE_PRIVATE_EVALUATION_CATALOG_HOURLY_LIMIT
+              == "101") and
+            (.services.coordinator.environment.MINDONE_PRIVATE_EVALUATION_ACCOUNT_HOURLY_LIMIT
+              == "102") and
+            (.services.coordinator.environment.MINDONE_PRIVATE_EVALUATION_DEVICE_HOURLY_LIMIT
+              == "103") and
+            (.services.coordinator.environment.MINDONE_PRIVATE_EVALUATION_NODE_HOURLY_LIMIT
+              == "104") and
+            (.services.coordinator.environment.MINDONE_PRIVATE_EVALUATION_COOLDOWN_SECONDS
+              == "105") and
+            (.services.coordinator.environment.MINDONE_PRIVATE_EVALUATION_GLOBAL_RESERVE_ENTRIES
+              == "106") and
+            ([.services.coordinator.secrets[].target] | sort
+              == ["mindone_postgres_ca", "mindone_private_evaluation_hmac_key",
+                  "mindone_standard_data_key"]) and
+            (.secrets.private_evaluation_hmac_key.file == $hmac_source) and
+            ([.services.coordinator.volumes[]
+              | select(.type == "bind"
+                  and .source == $keys_source
+                  and .target == "/run/mindone-quality/trusted-keys"
+                  and .read_only == true)] | length == 1) and
+            ((.services.coordinator.ports | length) == 1) and
+            (all(.services.coordinator.ports[];
+              .host_ip == "127.0.0.1" and .target == 8787))
+          ' "$operator_config_json"
+          case "$MINDONE_QUALITY_KEYS_HOST_DIR/" in
+            "$GITHUB_WORKSPACE/"*) exit 1 ;;
+          esac
+          case "$MINDONE_QUALITY_EVIDENCE_HOST_DIR/" in
+            "$GITHUB_WORKSPACE/"*) exit 1 ;;
+          esac
+          git check-ignore -q deploy/trusted-quality-keys/evaluator.pub
+          git check-ignore -q deploy/quality-evidence/evidence.json
+          grep -Fxq 'deploy/trusted-quality-keys' .dockerignore
+          grep -Fxq 'deploy/quality-evidence' .dockerignore
+
+      - name: 构建并启动无公网 connector 的生产数据面
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file /dev/null \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.cloudflared.yml \
+            up -d --build postgres coordinator
+          ready=0
+          for _ in $(seq 1 60); do
+            if docker compose --env-file /dev/null \
+              -f deploy/docker-compose.yml \
+              -f deploy/docker-compose.cloudflared.yml \
+              exec -T coordinator \
+              curl -fsS http://127.0.0.1:8787/ready >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if test "$ready" -ne 1; then
+            docker compose --env-file /dev/null \
+              -f deploy/docker-compose.yml \
+              -f deploy/docker-compose.cloudflared.yml ps
+            docker compose --env-file /dev/null \
+              -f deploy/docker-compose.yml \
+              -f deploy/docker-compose.cloudflared.yml \
+              logs --tail 100 postgres database-migrator database-role-init coordinator
+            exit 1
+          fi
+
+      - name: 验证 role-init 密码隔离与原子失败
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose=(
+            docker compose --env-file /dev/null
+            -f deploy/docker-compose.yml
+            -f deploy/docker-compose.cloudflared.yml
+          )
+          owner_psql() (
+            export PGPASSWORD="$MINDONE_POSTGRES_PASSWORD"
+            "${compose[@]}" exec -T -e PGPASSWORD postgres \
+              psql --no-psqlrc \
+              'host=postgres port=5432 dbname=mindone user=mindone sslmode=verify-full sslrootcert=/run/mindone-postgres-tls/ca.crt' \
+              --set=ON_ERROR_STOP=1 "$@"
+          )
+          runtime_psql() (
+            : "${PGPASSWORD:?缺少 runtime 登录密码}"
+            export PGPASSWORD
+            "${compose[@]}" exec -T -e PGPASSWORD postgres \
+              psql --no-psqlrc \
+              'host=postgres port=5432 dbname=mindone user=mindone_app sslmode=verify-full sslrootcert=/run/mindone-postgres-tls/ca.crt' \
+              --set=ON_ERROR_STOP=1 "$@"
+          )
+          same_password_log="$RUNNER_TEMP/mindone-role-init-same-password.log"
+          if (
+            export MINDONE_POSTGRES_APP_PASSWORD="$MINDONE_POSTGRES_PASSWORD"
+            "${compose[@]}" run --rm --no-deps -T database-role-init
+          ) >"$same_password_log" 2>&1; then
+            printf '%s\n' 'role-init 错误地接受了 owner/runtime 复用密码' >&2
+            exit 1
+          fi
+          PGPASSWORD="$MINDONE_POSTGRES_APP_PASSWORD" runtime_psql \
+            --tuples-only --no-align --command 'SELECT 1' >/dev/null
+
+          owner_psql >/dev/null <<'SQL'
+          CREATE TABLE public.mindone_ci_owned_probe (id integer PRIMARY KEY);
+          ALTER TABLE public.mindone_ci_owned_probe OWNER TO mindone_app;
+          ALTER ROLE mindone_app WITH INHERIT CONNECTION LIMIT 31 VALID UNTIL '2099-01-01 00:00:00+00';
+          ALTER ROLE mindone_app SET search_path TO pg_temp, public;
+          GRANT TEMP ON DATABASE mindone TO mindone_app;
+          GRANT CREATE ON SCHEMA public TO mindone_app;
+          SQL
+
+          atomic_password='mindone-ci-atomic-runtime-password-32-bytes'
+          test "$atomic_password" != "$MINDONE_POSTGRES_PASSWORD"
+          test "$atomic_password" != "$MINDONE_POSTGRES_APP_PASSWORD"
+          atomic_log="$RUNNER_TEMP/mindone-role-init-atomic-failure.log"
+          atomic_unexpected_success=0
+          if (
+            export MINDONE_POSTGRES_APP_PASSWORD="$atomic_password"
+            "${compose[@]}" run --rm --no-deps -T database-role-init
+          ) >"$atomic_log" 2>&1; then
+            atomic_unexpected_success=1
+          fi
+
+          original_password_works=0
+          if PGPASSWORD="$MINDONE_POSTGRES_APP_PASSWORD" runtime_psql \
+            --tuples-only --no-align --command 'SELECT 1' \
+            >"$RUNNER_TEMP/mindone-role-init-original-login.log" 2>&1; then
+            original_password_works=1
+          fi
+          candidate_password_works=0
+          if PGPASSWORD="$atomic_password" runtime_psql \
+            --tuples-only --no-align --command 'SELECT 1' \
+            >"$RUNNER_TEMP/mindone-role-init-candidate-login.log" 2>&1; then
+            candidate_password_works=1
+          fi
+          rollback_state=$(owner_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command "SELECT
+              rolinherit,
+              rolconnlimit,
+              rolvaliduntil = '2099-01-01 00:00:00+00'::timestamptz,
+              has_database_privilege('mindone_app', current_database(), 'TEMP'),
+              has_schema_privilege('mindone_app', 'public', 'CREATE'),
+              EXISTS (
+                SELECT 1 FROM pg_db_role_setting s
+                WHERE s.setrole = (SELECT oid FROM pg_roles WHERE rolname = 'mindone_app')
+                  AND s.setconfig @> ARRAY['search_path=pg_temp, public'])
+            FROM pg_roles WHERE rolname = 'mindone_app'")
+
+          owner_psql >/dev/null <<'SQL'
+          DROP TABLE public.mindone_ci_owned_probe;
+          SQL
+          "${compose[@]}" run --rm --no-deps -T database-role-init \
+            >"$RUNNER_TEMP/mindone-role-init-recovery.log" 2>&1
+
+          grep -Fq '数据库 owner 与 runtime 密码不得相同' "$same_password_log"
+          grep -Fq 'mindone_app owns database objects' "$atomic_log"
+          test "$atomic_unexpected_success" -eq 0
+          test "$original_password_works" -eq 1
+          test "$candidate_password_works" -eq 0
+          test "$rollback_state" = 't|31|t|t|t|t'
+
+      - name: 验证 API、迁移、runtime 最小权限、TLS 与零端口发布
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose=(
+            docker compose --env-file /dev/null
+            -f deploy/docker-compose.yml
+            -f deploy/docker-compose.cloudflared.yml
+          )
+          owner_psql() (
+            export PGPASSWORD="$MINDONE_POSTGRES_PASSWORD"
+            "${compose[@]}" exec -T -e PGPASSWORD postgres \
+              psql --no-psqlrc \
+              'host=postgres port=5432 dbname=mindone user=mindone sslmode=verify-full sslrootcert=/run/mindone-postgres-tls/ca.crt' \
+              --set=ON_ERROR_STOP=1 "$@"
+          )
+          runtime_psql() (
+            : "${PGPASSWORD:?缺少 runtime 登录密码}"
+            export PGPASSWORD
+            "${compose[@]}" exec -T -e PGPASSWORD postgres \
+              psql --no-psqlrc \
+              'host=postgres port=5432 dbname=mindone user=mindone_app sslmode=verify-full sslrootcert=/run/mindone-postgres-tls/ca.crt' \
+              --set=ON_ERROR_STOP=1 "$@"
+          )
+          owner_login_psql() (
+            : "${PGPASSWORD:?缺少 owner 登录密码}"
+            export PGPASSWORD
+            "${compose[@]}" exec -T -e PGPASSWORD postgres \
+              psql --no-psqlrc \
+              'host=postgres port=5432 dbname=mindone user=mindone sslmode=verify-full sslrootcert=/run/mindone-postgres-tls/ca.crt' \
+              --set=ON_ERROR_STOP=1 "$@"
+          )
+
+          "${compose[@]}" exec -T coordinator \
+            curl -fsS http://127.0.0.1:8787/health >/dev/null
+          "${compose[@]}" exec -T coordinator \
+            curl -fsS http://127.0.0.1:8787/ready >/dev/null
+          unauthorized_status=$("${compose[@]}" exec -T coordinator \
+            curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:8787/v1/quota/balance)
+          test "$unauthorized_status" = "401"
+
+          tls_state=$(owner_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command 'SELECT ssl, version FROM pg_stat_ssl WHERE pid = pg_backend_pid()')
+          case "$tls_state" in
+            't|TLSv'*) ;;
+            *) printf 'PostgreSQL TLS 会话异常：%s\n' "$tls_state" >&2; exit 1 ;;
+          esac
+
+          server_tls=$(owner_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command "SELECT current_setting('ssl'), current_setting('ssl_min_protocol_version')")
+          test "$server_tls" = 'on|TLSv1.2'
+
+          migration_state=$(owner_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command 'SELECT COUNT(*)::bigint,MIN(version),MAX(version),COALESCE(BOOL_AND(success),FALSE) FROM _sqlx_migrations')
+          expected_migration_state="${MINDONE_EXPECTED_MIGRATION_VERSION}|1|${MINDONE_EXPECTED_MIGRATION_VERSION}|t"
+          test "$migration_state" = "$expected_migration_state"
+
+          runtime_role_state=$(owner_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command "SELECT
+              rolcanlogin,
+              rolsuper,
+              rolcreatedb,
+              rolcreaterole,
+              rolinherit,
+              rolreplication,
+              rolbypassrls,
+              rolconnlimit,
+              rolvaliduntil IS NULL OR rolvaliduntil = 'infinity'::timestamptz
+            FROM pg_roles WHERE rolname = 'mindone_app'")
+          test "$runtime_role_state" = 't|f|f|f|f|f|f|32|t'
+
+          runtime_privileges=$(owner_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command "SELECT
+              has_database_privilege('mindone_app', current_database(), 'CONNECT'),
+              NOT has_database_privilege('mindone_app', current_database(), 'CREATE'),
+              NOT has_database_privilege('mindone_app', current_database(), 'TEMP'),
+              has_schema_privilege('mindone_app', 'public', 'USAGE'),
+              NOT has_schema_privilege('mindone_app', 'public', 'CREATE'),
+              has_table_privilege('mindone_app', 'public._sqlx_migrations', 'SELECT'),
+              NOT has_table_privilege('mindone_app', 'public._sqlx_migrations', 'INSERT'),
+              NOT has_table_privilege('mindone_app', 'public._sqlx_migrations', 'UPDATE'),
+              NOT has_table_privilege('mindone_app', 'public._sqlx_migrations', 'DELETE'),
+              NOT has_table_privilege('mindone_app', 'public._sqlx_migrations', 'TRUNCATE'),
+              NOT has_table_privilege('mindone_app', 'public._sqlx_migrations', 'REFERENCES'),
+              NOT has_table_privilege('mindone_app', 'public._sqlx_migrations', 'TRIGGER'),
+              COALESCE((SELECT bool_and(
+                has_table_privilege('mindone_app', c.oid, 'SELECT') AND
+                has_table_privilege('mindone_app', c.oid, 'INSERT') AND
+                has_table_privilege('mindone_app', c.oid, 'UPDATE') AND
+                has_table_privilege('mindone_app', c.oid, 'DELETE') AND
+                NOT has_table_privilege('mindone_app', c.oid, 'TRUNCATE') AND
+                NOT has_table_privilege('mindone_app', c.oid, 'REFERENCES') AND
+                NOT has_table_privilege('mindone_app', c.oid, 'TRIGGER'))
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public'
+                AND c.relkind IN ('r', 'p')
+                AND c.relname NOT IN (
+                  '_sqlx_migrations',
+                  'billing_profiles',
+                  'physical_billing_legacy_allowlist',
+                  'receipts',
+                  'billing_profile_provision_audits',
+                  'job_stream_events',
+                  'sla_exclusion_events',
+                  'email_verification_tokens',
+                  'inference_api_keys',
+                  'inference_api_key_events'
+                )), FALSE),
+              COALESCE((SELECT count(*) = 9 AND bool_and(
+                has_table_privilege(
+                  'mindone_app', format('public.%I', expected.table_name), 'SELECT'
+                ) = expected.allow_select AND
+                has_table_privilege(
+                  'mindone_app', format('public.%I', expected.table_name), 'INSERT'
+                ) = expected.allow_insert AND
+                has_table_privilege(
+                  'mindone_app', format('public.%I', expected.table_name), 'UPDATE'
+                ) = expected.allow_update AND
+                has_table_privilege(
+                  'mindone_app', format('public.%I', expected.table_name), 'DELETE'
+                ) = expected.allow_delete AND
+                NOT has_table_privilege(
+                  'mindone_app', format('public.%I', expected.table_name), 'TRUNCATE'
+                ) AND
+                NOT has_table_privilege(
+                  'mindone_app', format('public.%I', expected.table_name), 'REFERENCES'
+                ) AND
+                NOT has_table_privilege(
+                  'mindone_app', format('public.%I', expected.table_name), 'TRIGGER'
+                ))
+              FROM (VALUES
+                ('billing_profiles', TRUE, FALSE, FALSE, FALSE),
+                ('physical_billing_legacy_allowlist', TRUE, FALSE, FALSE, FALSE),
+                ('receipts', TRUE, TRUE, FALSE, FALSE),
+                ('billing_profile_provision_audits', TRUE, FALSE, FALSE, FALSE),
+                ('job_stream_events', TRUE, TRUE, FALSE, FALSE),
+                ('sla_exclusion_events', TRUE, FALSE, FALSE, FALSE),
+                ('email_verification_tokens', TRUE, TRUE, TRUE, FALSE),
+                ('inference_api_keys', TRUE, TRUE, TRUE, FALSE),
+                ('inference_api_key_events', TRUE, TRUE, FALSE, FALSE)
+              ) AS expected(
+                table_name, allow_select, allow_insert, allow_update, allow_delete
+              )
+              WHERE to_regclass(format('public.%I', expected.table_name)) IS NOT NULL), FALSE)")
+          test "$runtime_privileges" = 't|t|t|t|t|t|t|t|t|t|t|t|t|t'
+
+          runtime_isolation=$(owner_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command "WITH app AS (
+              SELECT oid FROM pg_roles WHERE rolname = 'mindone_app'
+            )
+            SELECT
+              NOT EXISTS (
+                SELECT 1 FROM pg_auth_members m, app
+                WHERE m.roleid = app.oid OR m.member = app.oid),
+              NOT EXISTS (
+                SELECT 1 FROM pg_shdepend d, app
+                WHERE d.refclassid = 'pg_authid'::regclass
+                  AND d.refobjid = app.oid
+                  AND d.deptype = 'o'),
+              (SELECT count(*) = 1 AND bool_and(
+                  s.setdatabase = 0 AND
+                  s.setconfig = ARRAY['search_path=pg_catalog, public']::text[])
+                FROM pg_db_role_setting s, app
+                WHERE s.setrole = app.oid),
+              COALESCE((SELECT bool_and(
+                  has_function_privilege('mindone_app', p.oid, 'EXECUTE') =
+                  (p.oid IN (
+                    'public.mindone_physical_billing_snapshot_is_valid_v1(text,uuid,bigint,text,text,text,text,timestamptz,timestamptz,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint)'::regprocedure,
+                    'public.mindone_record_billing_profile_v1(uuid,uuid,uuid,bigint,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,bigint,text,timestamptz,timestamptz,text,text,text,text)'::regprocedure,
+                    'public.mindone_record_sla_exclusion_v1(uuid,uuid,text,text,text,text,text,text)'::regprocedure
+                  )))
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname = 'public'), FALSE),
+              NOT EXISTS (
+                SELECT 1
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                CROSS JOIN LATERAL aclexplode(
+                  COALESCE(p.proacl, acldefault('f', p.proowner))
+                ) acl
+                WHERE n.nspname = 'public'
+                  AND acl.grantee = 0
+                  AND acl.privilege_type = 'EXECUTE')")
+          test "$runtime_isolation" = 't|t|t|t|t'
+
+          runtime_tls=$(PGPASSWORD="$MINDONE_POSTGRES_APP_PASSWORD" runtime_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command "SELECT current_user, ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
+          test "$runtime_tls" = 'mindone_app|t'
+
+          wrong_password='mindone-ci-intentionally-wrong-password'
+          test "$wrong_password" != "$MINDONE_POSTGRES_PASSWORD"
+          test "$wrong_password" != "$MINDONE_POSTGRES_APP_PASSWORD"
+          if PGPASSWORD="$wrong_password" runtime_psql --command 'SELECT 1' \
+            >"$RUNNER_TEMP/mindone-runtime-wrong-password.log" 2>&1; then
+            printf '%s\n' 'runtime 角色错误地接受了错误密码' >&2
+            exit 1
+          fi
+          if PGPASSWORD="$MINDONE_POSTGRES_PASSWORD" runtime_psql --command 'SELECT 1' \
+            >"$RUNNER_TEMP/mindone-runtime-owner-password.log" 2>&1; then
+            printf '%s\n' 'runtime 角色错误地接受了 owner 密码' >&2
+            exit 1
+          fi
+          if PGPASSWORD="$MINDONE_POSTGRES_APP_PASSWORD" owner_login_psql --command 'SELECT 1' \
+            >"$RUNNER_TEMP/mindone-owner-runtime-password.log" 2>&1; then
+            printf '%s\n' 'owner 角色错误地接受了 runtime 密码' >&2
+            exit 1
+          fi
+
+          runtime_search_path=$(PGPASSWORD="$MINDONE_POSTGRES_APP_PASSWORD" runtime_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command "SELECT current_setting('search_path'),
+              (SELECT count(*) > 0 FROM public._sqlx_migrations)")
+          test "$runtime_search_path" = 'pg_catalog, public|t'
+          if PGPASSWORD="$MINDONE_POSTGRES_APP_PASSWORD" runtime_psql \
+            --command 'CREATE TEMP TABLE _sqlx_migrations (version bigint)' \
+            >"$RUNNER_TEMP/mindone-runtime-temp-shadow.log" 2>&1; then
+            printf '%s\n' 'runtime 角色错误地可创建 TEMP 遮蔽表' >&2
+            exit 1
+          fi
+          if PGPASSWORD="$MINDONE_POSTGRES_APP_PASSWORD" runtime_psql \
+            --command 'CREATE SCHEMA mindone_ci_shadow' \
+            >"$RUNNER_TEMP/mindone-runtime-schema-shadow.log" 2>&1; then
+            printf '%s\n' 'runtime 角色错误地可创建优先 schema' >&2
+            exit 1
+          fi
+
+          if PGPASSWORD="$MINDONE_POSTGRES_APP_PASSWORD" runtime_psql \
+            --command 'UPDATE public._sqlx_migrations SET success = success WHERE FALSE' \
+            >"$RUNNER_TEMP/mindone-runtime-migration-write.log" 2>&1; then
+            printf '%s\n' 'runtime 角色错误地获得了迁移元数据写权限' >&2
+            exit 1
+          fi
+          grep -Eq 'permission denied.*_sqlx_migrations' \
+            "$RUNNER_TEMP/mindone-runtime-migration-write.log"
+
+          coordinator_sessions=$(owner_psql \
+            --tuples-only --no-align --field-separator='|' \
+            --command "SELECT
+              count(*) FILTER (WHERE a.usename = 'mindone_app'),
+              coalesce(bool_and(s.ssl) FILTER (WHERE a.usename = 'mindone_app'), false),
+              count(*) FILTER (WHERE a.usename = 'mindone')
+            FROM pg_stat_activity a
+            JOIN pg_stat_ssl s ON s.pid = a.pid
+            WHERE a.pid <> pg_backend_pid()
+              AND a.datname = 'mindone'
+              AND a.application_name <> 'psql'")
+          case "$coordinator_sessions" in
+            [1-9]*'|t|0') ;;
+            *) printf '未观察到协调器 TLS 数据库会话：%s\n' "$coordinator_sessions" >&2; exit 1 ;;
+          esac
+
+          if PGPASSWORD="$MINDONE_POSTGRES_PASSWORD" "${compose[@]}" exec -T \
+            -e PGPASSWORD postgres \
+            psql --no-psqlrc \
+            'host=postgres port=5432 dbname=mindone user=mindone sslmode=disable' \
+            --command 'SELECT 1' \
+            >"$RUNNER_TEMP/mindone-plaintext-postgres.log" 2>&1; then
+            printf '%s\n' 'PostgreSQL 错误地接受了明文 TCP' >&2
+            exit 1
+          fi
+          grep -Eq 'pg_hba.conf rejects connection|no encryption' \
+            "$RUNNER_TEMP/mindone-plaintext-postgres.log"
+
+          coordinator_id=$("${compose[@]}" ps -q coordinator)
+          postgres_id=$("${compose[@]}" ps -q postgres)
+          test -n "$coordinator_id"
+          test -n "$postgres_id"
+          test -z "$(docker port "$coordinator_id")"
+          test -z "$(docker port "$postgres_id")"
+          docker inspect "$coordinator_id" | jq -e '
+            ((.[0].HostConfig.PortBindings // {}) | length == 0) and
+            (.[0].NetworkSettings.Ports["8787/tcp"] == null) and
+            ([.[0].NetworkSettings.Networks[].IPAddress] | index("172.31.255.2") != null)
+          '
+          docker inspect "$postgres_id" | jq -e '
+            ((.[0].HostConfig.PortBindings // {}) | length == 0) and
+            (.[0].NetworkSettings.Ports["5432/tcp"] == null)
+          '
+          test -z "$("${compose[@]}" ps -q cloudflared)"
+
+      - name: 验证开发 Compose fresh 空卷自动迁移并就绪
+        shell: bash
+        run: |
+          set -euo pipefail
+          export MINDONE_DEV_POSTGRES_PASSWORD
+          MINDONE_DEV_POSTGRES_PASSWORD=$(openssl rand -hex 24)
+          export MINDONE_DEV_STANDARD_DATA_KEY
+          MINDONE_DEV_STANDARD_DATA_KEY=$(openssl rand -hex 32)
+          export MINDONE_COORDINATOR_HOST_PORT=18790
+          dev_compose=(
+            docker compose -p mindone-dev-fresh-ci --env-file /dev/null
+            -f deploy/docker-compose.dev.yml
+          )
+          "${dev_compose[@]}" down --volumes --remove-orphans --timeout 10 || true
+          "${dev_compose[@]}" up -d --no-build postgres coordinator
+
+          ready=0
+          for _ in $(seq 1 90); do
+            if curl -fsS "http://127.0.0.1:${MINDONE_COORDINATOR_HOST_PORT}/ready" \
+              >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if test "$ready" -ne 1; then
+            "${dev_compose[@]}" ps -a
+            "${dev_compose[@]}" logs --tail 100 postgres database-migrator coordinator
+            exit 1
+          fi
+
+          migrator_id=$("${dev_compose[@]}" ps -aq database-migrator)
+          test -n "$migrator_id"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$migrator_id")" = "0"
+          migration_state=$("${dev_compose[@]}" exec -T postgres \
+            psql --no-psqlrc -U mindone -d mindone_dev \
+            --tuples-only --no-align --field-separator='|' \
+            --command 'SELECT COUNT(*)::bigint,MIN(version),MAX(version),COALESCE(BOOL_AND(success),FALSE) FROM _sqlx_migrations')
+          expected_migration_state="${MINDONE_EXPECTED_MIGRATION_VERSION}|1|${MINDONE_EXPECTED_MIGRATION_VERSION}|t"
+          test "$migration_state" = "$expected_migration_state"
+
+      - name: 清理生产部署门禁资源
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          export MINDONE_POSTGRES_TLS_DIR="${MINDONE_POSTGRES_TLS_DIR:-$RUNNER_TEMP/mindone-postgres-tls}"
+          export MINDONE_CLOUDFLARED_TOKEN_FILE="${MINDONE_CLOUDFLARED_TOKEN_FILE:-$RUNNER_TEMP/mindone-cloudflared-token}"
+          export MINDONE_STANDARD_DATA_KEY_FILE="${MINDONE_STANDARD_DATA_KEY_FILE:-$RUNNER_TEMP/mindone-standard-data-key}"
+          export MINDONE_QUALITY_KEYS_HOST_DIR="${MINDONE_QUALITY_KEYS_HOST_DIR:-$RUNNER_TEMP/mindone-quality-trusted-keys}"
+          export MINDONE_QUALITY_EVIDENCE_HOST_DIR="${MINDONE_QUALITY_EVIDENCE_HOST_DIR:-$RUNNER_TEMP/mindone-quality-evidence}"
+          docker compose --env-file /dev/null \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.cloudflared.yml \
+            down --volumes --remove-orphans --timeout 10 || true
+          MINDONE_DEV_POSTGRES_PASSWORD='cleanup-only-password' \
+          MINDONE_DEV_STANDARD_DATA_KEY='5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a' \
+          docker compose -p mindone-dev-fresh-ci --env-file /dev/null \
+            -f deploy/docker-compose.dev.yml \
+            down --volumes --remove-orphans --timeout 10 || true
+          if test "$MINDONE_POSTGRES_TLS_DIR" = "$RUNNER_TEMP/mindone-postgres-tls"; then
+            rm -rf -- "$MINDONE_POSTGRES_TLS_DIR"
+          fi
+          if test "$MINDONE_CLOUDFLARED_TOKEN_FILE" = "$RUNNER_TEMP/mindone-cloudflared-token"; then
+            rm -f -- "$MINDONE_CLOUDFLARED_TOKEN_FILE"
+          fi
+          if test "$MINDONE_STANDARD_DATA_KEY_FILE" = "$RUNNER_TEMP/mindone-standard-data-key"; then
+            rm -f -- "$MINDONE_STANDARD_DATA_KEY_FILE"
+          fi
+          if test "$MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE" = "$RUNNER_TEMP/mindone-private-evaluation-hmac-key"; then
+            rm -f -- "$MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE"
+          fi
+          if test "$MINDONE_QUALITY_KEYS_HOST_DIR" = "$RUNNER_TEMP/mindone-quality-trusted-keys"; then
+            rm -rf -- "$MINDONE_QUALITY_KEYS_HOST_DIR"
+          fi
+          if test "$MINDONE_QUALITY_EVIDENCE_HOST_DIR" = "$RUNNER_TEMP/mindone-quality-evidence"; then
+            rm -rf -- "$MINDONE_QUALITY_EVIDENCE_HOST_DIR"
+          fi
+          rm -f -- \
+            "$RUNNER_TEMP/mindone-compose-overlay.json" \
+            "$RUNNER_TEMP/mindone-compose-quality-operator.json" \
+            "$RUNNER_TEMP/mindone-owner-runtime-password.log" \
+            "$RUNNER_TEMP/mindone-plaintext-postgres.log" \
+            "$RUNNER_TEMP/mindone-role-init-atomic-failure.log" \
+            "$RUNNER_TEMP/mindone-role-init-candidate-login.log" \
+            "$RUNNER_TEMP/mindone-role-init-original-login.log" \
+            "$RUNNER_TEMP/mindone-role-init-recovery.log" \
+            "$RUNNER_TEMP/mindone-role-init-same-password.log" \
+            "$RUNNER_TEMP/mindone-runtime-migration-write.log" \
+            "$RUNNER_TEMP/mindone-runtime-owner-password.log" \
+            "$RUNNER_TEMP/mindone-runtime-schema-shadow.log" \
+            "$RUNNER_TEMP/mindone-runtime-temp-shadow.log" \
+            "$RUNNER_TEMP/mindone-runtime-wrong-password.log"
+
+  platform-build:
+    name: 构建 ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 安装目标工具链
+        run: rustup target add ${{ matrix.target }}
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: ${{ matrix.target }}
+
+      - name: 编译工作区全部目标
+        run: cargo build --locked --workspace --all-targets --target ${{ matrix.target }}
+
+  linux-sandbox-gate:
+    name: Linux 四层真实沙盒门禁
+    runs-on: ubuntu-24.04
+    needs: quality
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: linux-sandbox-gate
+
+      - name: 安装 bubblewrap 并启用临时 runner user namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          if test "$(sysctl -n user.max_user_namespaces)" -eq 0; then
+            sudo sysctl -w user.max_user_namespaces=28633
+          fi
+          test "$(sysctl -n user.max_user_namespaces)" -gt 0
+          test ! -L /usr/bin/bwrap
+          test -f /usr/bin/bwrap
+          test "$(stat -c '%u' /usr/bin/bwrap)" -eq 0
+          bwrap_mode=$(stat -c '%a' /usr/bin/bwrap)
+          test "$((8#$bwrap_mode & 8#022))" -eq 0
+          bwrap --version
+
+      - name: 构建 CLI 监督进程
+        run: cargo build --locked -p mindone-cli
+
+      - name: 真实验证 namespace、bubblewrap、Landlock 与 seccomp-bpf
+        env:
+          MINDONE_REAL_LINUX_SANDBOX_TEST: "1"
+        run: |
+          test "$MINDONE_REAL_LINUX_SANDBOX_TEST" = "1"
+          cargo test --locked -p mindone-cli --test linux_sandbox -- --ignored --nocapture
+
+  macos-sandbox-gate:
+    name: macOS Seatbelt 与卸载安全门禁
+    runs-on: macos-15
+    needs: quality
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: macos-sandbox-gate
+
+      - name: 确认 Seatbelt 启动器存在
+        run: test -x /usr/bin/sandbox-exec
+
+      - name: 真实验证允许目标并拒绝越权写入与 sibling 模型
+        env:
+          MINDONE_REAL_SEATBELT_TEST: "1"
+        run: |
+          test "$MINDONE_REAL_SEATBELT_TEST" = "1"
+          cargo test --locked -p mindone-sandbox --test macos_seatbelt -- --ignored --nocapture
+
+      - name: 验证 macOS 卸载安全边界
+        run: |
+          cargo build --locked -p mindone-cli
+          sh scripts/uninstall-smoke.sh target/debug/mindone
+
+  installer-smoke:
+    name: 发行安装与卸载冒烟
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: installer-smoke
+
+      - name: 构造本机已校验发行目录
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p mindone-cli
+          release_root="$RUNNER_TEMP/mindone-release"
+          package_root="$RUNNER_TEMP/mindone-package"
+          mkdir -p "$release_root" "$package_root"
+          cp target/release/mindone "$package_root/mindone"
+          cp LICENSE "$package_root/LICENSE"
+          printf '%s\n' 'CI 本机冒烟包；正式签名状态由 release.yml 生成。' > "$package_root/CODE_SIGNING.txt"
+          tar -C "$package_root" -czf "$release_root/mindone-x86_64-unknown-linux-gnu.tar.gz" \
+            mindone LICENSE CODE_SIGNING.txt
+          (
+            cd "$release_root"
+            sha256sum mindone-x86_64-unknown-linux-gnu.tar.gz > checksums.sha256
+          )
+          printf 'v1.0.0\n' > "$release_root/release-version.txt"
+
+      - name: 运行安装、版本、帮助、诊断与卸载
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_root="$RUNNER_TEMP/mindone-release"
+          test_home="$RUNNER_TEMP/mindone-clean-home"
+          install_dir="$test_home/bin"
+          mkdir -p "$test_home"
+          python3 -m http.server 18081 --bind 127.0.0.1 --directory "$release_root" \
+            >"$RUNNER_TEMP/mindone-release-http.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:18081/release-version.txt >/dev/null && break
+            sleep 1
+          done
+          HOME="$test_home" \
+          SHELL=/bin/bash \
+          MINDONE_INSTALL_DIR="$install_dir" \
+          MINDONE_RELEASE_URL=http://127.0.0.1:18081 \
+          MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
+            sh scripts/install.sh
+          "$install_dir/mindone" --version | grep -Fx 'mindone 1.0.0'
+          "$install_dir/mindone" --help | grep -F 'MindOne'
+          test "$(grep -Fxc '# >>> MindOne CLI PATH (managed) >>>' "$test_home/.bashrc")" -eq 1
+          HOME="$test_home" PATH=/usr/bin:/bin bash --noprofile --rcfile "$test_home/.bashrc" \
+            -c 'mindone --version' | grep -Fx 'mindone 1.0.0'
+          printf 'v0.9.0\n' > "$release_root/release-version.txt"
+          if HOME="$test_home" \
+             MINDONE_INSTALL_DIR="$install_dir" \
+             MINDONE_RELEASE_URL=http://127.0.0.1:18081 \
+             MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
+               sh scripts/install.sh > "$RUNNER_TEMP/downgrade.log" 2>&1; then
+            printf '%s\n' '安装器未拒绝默认降级' >&2
+            exit 1
+          fi
+          grep -F '拒绝把 MindOne 从 1.0.0 降级到 0.9.0' "$RUNNER_TEMP/downgrade.log"
+          "$install_dir/mindone" --version | grep -Fx 'mindone 1.0.0'
+          HOME="$test_home" \
+          MINDONE_INSTALL_DIR="$install_dir" \
+          MINDONE_RELEASE_URL=http://127.0.0.1:18081 \
+          MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
+            sh scripts/install.sh --check \
+              | grep -F '已安装版本 1.0.0 高于所查发行版 0.9.0'
+          printf 'v1.0.0-rc.1\n' > "$release_root/release-version.txt"
+          if HOME="$test_home" \
+             MINDONE_INSTALL_DIR="$install_dir" \
+             MINDONE_RELEASE_URL=http://127.0.0.1:18081 \
+             MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
+               sh scripts/install.sh > "$RUNNER_TEMP/prerelease-downgrade.log" 2>&1; then
+            printf '%s\n' '安装器未按 SemVer 拒绝从正式版降级到预发布版' >&2
+            exit 1
+          fi
+          grep -F '拒绝把 MindOne 从 1.0.0 降级到 1.0.0-rc.1' \
+            "$RUNNER_TEMP/prerelease-downgrade.log"
+          printf 'v1.0.0\n' > "$release_root/release-version.txt"
+          doctor_code=0
+          HOME="$test_home" MINDONE_HOME="$test_home/data" \
+            "$install_dir/mindone" doctor --json > "$RUNNER_TEMP/doctor.json" || doctor_code=$?
+          test "$doctor_code" -eq 0 -o "$doctor_code" -eq 1 -o "$doctor_code" -eq 31
+          python3 - "$RUNNER_TEMP/doctor.json" "$doctor_code" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              value = json.load(stream)
+          process_code = int(sys.argv[2])
+          assert value["code"] in (0, 1, 31)
+          assert value["code"] == process_code
+          assert value["ok"] is (process_code == 0)
+          summary = value["data"]["summary"]
+          sandbox = [
+              check for check in value["data"]["checks"]
+              if check["name"] == "沙盒能力"
+          ]
+          assert len(sandbox) == 1
+          expected = 1 if summary["failures"] > 0 else (
+              31 if sandbox[0]["status"] == "warning" else 0
+          )
+          assert process_code == expected
+          PY
+          HOME="$test_home" MINDONE_HOME="$test_home/data" \
+          MINDONE_INSTALL_DIR="$install_dir" sh scripts/uninstall.sh --yes
+          test ! -e "$install_dir/mindone"
+          test "$(grep -Fxc '# >>> MindOne CLI PATH (managed) >>>' "$test_home/.bashrc" || true)" -eq 0
+          test -z "$(find "$install_dir" -maxdepth 1 -name '.mindone.new.*' -print 2>/dev/null)"
+
+      - name: 验证 Unix 安装器拒绝恶意发行包与危险目标
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="mindone-x86_64-unknown-linux-gnu.tar.gz"
+          negative_root="$RUNNER_TEMP/mindone-negative-releases"
+          test_root="$RUNNER_TEMP/mindone-negative-installs"
+          mkdir -p "$negative_root" "$test_root"
+
+          prepare_package() {
+            case_name=$1
+            case_dir="$negative_root/$case_name"
+            package_dir="$case_dir/package"
+            mkdir -p "$package_dir"
+            cp LICENSE "$package_dir/LICENSE"
+            printf '%s\n' 'CI 负向边界测试包。' > "$package_dir/CODE_SIGNING.txt"
+          }
+
+          finish_release() {
+            case_name=$1
+            case_dir="$negative_root/$case_name"
+            (
+              cd "$case_dir"
+              sha256sum "$artifact" > checksums.sha256
+            )
+            printf 'v1.0.0\n' > "$case_dir/release-version.txt"
+          }
+
+          prepare_package duplicate
+          cp target/release/mindone "$negative_root/duplicate/package/mindone"
+          tar -czf "$negative_root/duplicate/$artifact" \
+            -C "$negative_root/duplicate/package" \
+            mindone LICENSE CODE_SIGNING.txt mindone
+          finish_release duplicate
+
+          prepare_package symlink
+          ln -s outside "$negative_root/symlink/package/mindone"
+          tar -czf "$negative_root/symlink/$artifact" \
+            -C "$negative_root/symlink/package" \
+            mindone LICENSE CODE_SIGNING.txt
+          finish_release symlink
+
+          prepare_package fifo
+          mkfifo "$negative_root/fifo/package/mindone"
+          tar -czf "$negative_root/fifo/$artifact" \
+            -C "$negative_root/fifo/package" \
+            mindone LICENSE CODE_SIGNING.txt
+          finish_release fifo
+
+          prepare_package extra
+          cp target/release/mindone "$negative_root/extra/package/mindone"
+          cp LICENSE "$negative_root/extra/package/unexpected.txt"
+          tar -czf "$negative_root/extra/$artifact" \
+            -C "$negative_root/extra/package" \
+            mindone LICENSE CODE_SIGNING.txt unexpected.txt
+          finish_release extra
+
+          prepare_package valid
+          cp target/release/mindone "$negative_root/valid/package/mindone"
+          tar -czf "$negative_root/valid/$artifact" \
+            -C "$negative_root/valid/package" \
+            mindone LICENSE CODE_SIGNING.txt
+          finish_release valid
+
+          python3 -m http.server 18083 --bind 127.0.0.1 --directory "$negative_root" \
+            >"$RUNNER_TEMP/mindone-negative-http.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:18083/valid/release-version.txt >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18083/valid/release-version.txt >/dev/null
+
+          expect_archive_rejected() {
+            case_name=$1
+            case_home="$test_root/$case_name"
+            install_dir="$case_home/bin"
+            log_file="$case_home/install.log"
+            mkdir -p "$case_home"
+            if HOME="$case_home" \
+               MINDONE_INSTALL_DIR="$install_dir" \
+               MINDONE_RELEASE_URL="http://127.0.0.1:18083/$case_name" \
+               MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
+                 sh scripts/install.sh >"$log_file" 2>&1; then
+              printf '恶意发行包未被拒绝：%s\n' "$case_name" >&2
+              sed -n '1,160p' "$log_file" >&2
+              return 1
+            fi
+            grep -F '错误：' "$log_file" >/dev/null
+            test ! -e "$install_dir/mindone"
+            test -z "$(find "$case_home" -name '.mindone.new.*' -print 2>/dev/null)"
+          }
+
+          expect_archive_rejected duplicate
+          expect_archive_rejected symlink
+          expect_archive_rejected fifo
+          expect_archive_rejected extra
+
+          symlink_home="$test_root/target-symlink"
+          symlink_install="$symlink_home/bin"
+          symlink_victim="$symlink_home/victim.txt"
+          mkdir -p "$symlink_install"
+          printf 'must-stay\n' > "$symlink_victim"
+          ln -s "$symlink_victim" "$symlink_install/mindone"
+          if HOME="$symlink_home" \
+             MINDONE_INSTALL_DIR="$symlink_install" \
+             MINDONE_RELEASE_URL=http://127.0.0.1:18083/valid \
+             MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
+               sh scripts/install.sh >"$symlink_home/install.log" 2>&1; then
+            printf '%s\n' '安装目标符号链接未被拒绝' >&2
+            exit 1
+          fi
+          test -L "$symlink_install/mindone"
+          grep -Fx 'must-stay' "$symlink_victim"
+
+          parent_home="$test_root/parent-symlink"
+          parent_victim="$parent_home/real/bin/mindone"
+          mkdir -p "$parent_home/real/bin"
+          cp target/release/mindone "$parent_victim"
+          parent_before=$(sha256sum "$parent_victim" | awk '{print $1}')
+          ln -s "$parent_home/real" "$parent_home/linked"
+          if HOME="$parent_home" \
+             MINDONE_INSTALL_DIR="$parent_home/linked/bin" \
+             MINDONE_RELEASE_URL=http://127.0.0.1:18083/valid \
+             MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
+               sh scripts/install.sh >"$parent_home/install.log" 2>&1; then
+            printf '%s\n' '安装目录父链符号链接未被拒绝' >&2
+            exit 1
+          fi
+          parent_after=$(sha256sum "$parent_victim" | awk '{print $1}')
+          test "$parent_before" = "$parent_after"
+
+          broad_home="$test_root/broad-install-path"
+          mkdir -p "$broad_home"
+          if HOME="$broad_home" \
+             MINDONE_INSTALL_DIR="$broad_home" \
+             MINDONE_RELEASE_URL=http://127.0.0.1:18083/valid \
+             MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
+               sh scripts/install.sh >"$broad_home/install.log" 2>&1; then
+            printf '%s\n' '宽泛安装路径未被拒绝' >&2
+            exit 1
+          fi
+          test ! -e "$broad_home/mindone"
+
+          foreign_home="$test_root/target-foreign"
+          foreign_install="$foreign_home/bin"
+          mkdir -p "$foreign_install"
+          printf '%s\n' '#!/bin/sh' 'printf "not-mindone 9.9.9\\n"' \
+            > "$foreign_install/mindone"
+          chmod 755 "$foreign_install/mindone"
+          foreign_before=$(sha256sum "$foreign_install/mindone" | awk '{print $1}')
+          if HOME="$foreign_home" \
+             MINDONE_INSTALL_DIR="$foreign_install" \
+             MINDONE_RELEASE_URL=http://127.0.0.1:18083/valid \
+             MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
+               sh scripts/install.sh >"$foreign_home/install.log" 2>&1; then
+            printf '%s\n' '已有非 MindOne 安装目标未被拒绝' >&2
+            exit 1
+          fi
+          foreign_after=$(sha256sum "$foreign_install/mindone" | awk '{print $1}')
+          test "$foreign_before" = "$foreign_after"
+          test -z "$(find "$test_root" -name '.mindone.new.*' -print 2>/dev/null)"
+
+      - name: 验证 Linux 卸载安全边界
+        shell: bash
+        run: sh scripts/uninstall-smoke.sh target/release/mindone
+
+  windows-installer-smoke:
+    name: Windows 安装与安全卸载冒烟
+    runs-on: windows-latest
+    needs: quality
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: windows-installer-smoke
+
+      - name: 构造本机已校验 Windows 发行目录
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          cargo build --locked --release -p mindone-cli `
+            --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "Windows CLI 构建失败" }
+          cargo test --locked -p mindone-sandbox --target x86_64-pc-windows-msvc `
+            capability::tests::windows_report_is_experimental_until_appcontainer_supervisor_exists `
+            -- --exact --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Windows 沙盒能力降级测试失败" }
+          cargo test --locked -p mindone-cli --target x86_64-pc-windows-msvc `
+            --test windows_job -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Windows Job Object supervisor 真实冒烟失败" }
+          ./scripts/verify-windows-self-contained.ps1 `
+            -Binary "target/x86_64-pc-windows-msvc/release/mindone.exe"
+
+          $releaseRoot = Join-Path $env:RUNNER_TEMP "mindone-windows-release"
+          $packageRoot = Join-Path $env:RUNNER_TEMP "mindone-windows-package"
+          New-Item -ItemType Directory -Path $releaseRoot, $packageRoot -Force | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/mindone.exe `
+            (Join-Path $packageRoot "mindone.exe")
+          Copy-Item LICENSE (Join-Path $packageRoot "LICENSE")
+          Set-Content -LiteralPath (Join-Path $packageRoot "CODE_SIGNING.txt") -Encoding ascii `
+            -Value "CI 本机冒烟包；正式签名状态由 release.yml 生成。"
+
+          $artifact = "mindone-x86_64-pc-windows-msvc.zip"
+          $archive = Join-Path $releaseRoot $artifact
+          $packageFiles = @(
+            (Join-Path $packageRoot "mindone.exe"),
+            (Join-Path $packageRoot "LICENSE"),
+            (Join-Path $packageRoot "CODE_SIGNING.txt")
+          )
+          Compress-Archive -LiteralPath $packageFiles -DestinationPath $archive -CompressionLevel Optimal
+          $digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath (Join-Path $releaseRoot "checksums.sha256") -Encoding ascii `
+            -Value "$digest *$artifact"
+          Set-Content -LiteralPath (Join-Path $releaseRoot "release-version.txt") -Encoding ascii `
+            -Value "v1.0.0"
+
+      - name: 验证安装、版本、帮助、doctor、拒绝边界与卸载
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          if (Test-Path Variable:PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+
+          function Assert-ScriptFails([scriptblock]$Action, [string]$Label) {
+            $failed = $false
+            try {
+              & $Action | Out-Host
+            }
+            catch {
+              Write-Host "$Label 已按预期拒绝：$($_.Exception.Message)"
+              $failed = $true
+            }
+            if (-not $failed) { throw "$Label 本应失败" }
+          }
+
+          $releaseRoot = Join-Path $env:RUNNER_TEMP "mindone-windows-release"
+          $testRoot = Join-Path $env:RUNNER_TEMP "mindone-windows-clean-home"
+          $hadLocalAppData = Test-Path Env:LOCALAPPDATA
+          $originalLocalAppData = if ($hadLocalAppData) { $env:LOCALAPPDATA } else { $null }
+          $env:LOCALAPPDATA = $testRoot
+          $dataDir = Join-Path $testRoot "MindOne"
+          $installDir = Join-Path $dataDir "bin"
+          $binary = Join-Path $installDir "mindone.exe"
+          $serverOut = Join-Path $env:RUNNER_TEMP "mindone-windows-release-http.out.log"
+          $serverErr = Join-Path $env:RUNNER_TEMP "mindone-windows-release-http.err.log"
+          New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+
+          $python = (Get-Command python).Source
+          $pathBefore = $env:Path
+          $userPathBefore = [Environment]::GetEnvironmentVariable("Path", "User")
+          $server = Start-Process -FilePath $python `
+            -ArgumentList @("-m", "http.server", "18082", "--bind", "127.0.0.1") `
+            -WorkingDirectory $releaseRoot `
+            -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              try {
+                Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 `
+                  -Uri "http://127.0.0.1:18082/release-version.txt" | Out-Null
+                $ready = $true
+                break
+              }
+              catch {
+                Start-Sleep -Milliseconds 500
+              }
+            }
+            if (-not $ready) { throw "本机发行 HTTP 服务未就绪" }
+
+            $env:MINDONE_RELEASE_URL = "http://127.0.0.1:18082"
+            $env:MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP = "1"
+          $env:MINDONE_INSTALL_DIR = $installDir
+          $env:MINDONE_HOME = $dataDir
+
+          & ./scripts/install.ps1
+          if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "安装后缺少 mindone.exe" }
+          if ($env:Path -notlike "$installDir;*") { throw "安装器没有更新当前进程 PATH" }
+          $installedUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if (($installedUserPath -split ';')[0] -ine $installDir) {
+            throw "安装器没有把安装目录写入用户 PATH"
+          }
+          $bareVersion = (& mindone --version 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $bareVersion -cne "mindone 1.0.0") {
+            throw "安装后裸 mindone 无法解析：$bareVersion"
+          }
+
+            $version = (& $binary --version 2>&1 | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $version -cne "mindone 1.0.0") {
+              throw "版本输出不符合合同：$version"
+            }
+            Set-Content -LiteralPath (Join-Path $releaseRoot "release-version.txt") -Encoding ascii `
+              -Value "v0.9.0"
+            Assert-ScriptFails { & ./scripts/install.ps1 } "默认降级保护"
+            $versionAfterRefusal = (& $binary --version 2>&1 | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $versionAfterRefusal -cne "mindone 1.0.0") {
+              throw "拒绝降级时修改了现有版本：$versionAfterRefusal"
+            }
+            $downgradeCheck = (& ./scripts/install.ps1 -Check | Out-String)
+            if ($downgradeCheck -notmatch "已安装版本 1.0.0 高于所查发行版 0.9.0") {
+              throw "更新检查错误地把较旧发行版报告成可更新：$downgradeCheck"
+            }
+            Set-Content -LiteralPath (Join-Path $releaseRoot "release-version.txt") -Encoding ascii `
+              -Value "v1.0.0-rc.1"
+            Assert-ScriptFails { & ./scripts/install.ps1 } "正式版到预发布版的 SemVer 降级保护"
+            Set-Content -LiteralPath (Join-Path $releaseRoot "release-version.txt") -Encoding ascii `
+              -Value "v1.0.0"
+            $help = (& $binary --help 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0 -or $help -notmatch "MindOne" -or $help -notmatch "用法") {
+              throw "中文帮助冒烟失败"
+            }
+            $launchOutput = (& ./scripts/install.ps1 -Launch 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0 -or
+                $launchOutput -notmatch "当前不是交互式终端" -or
+                $launchOutput -notmatch "用法") {
+              throw "-Launch 非交互安全降级失败：$launchOutput"
+            }
+
+            $doctorError = Join-Path $env:RUNNER_TEMP "mindone-windows-doctor.err.log"
+            $doctorOutput = @(& $binary doctor --json 2>$doctorError)
+            $doctorCode = $LASTEXITCODE
+            if ($doctorCode -notin @(0, 1, 31)) { throw "doctor 退出码异常：$doctorCode" }
+            $doctor = ($doctorOutput -join "`n") | ConvertFrom-Json
+            if ($doctor.code -notin @(0, 1, 31) -or $null -eq $doctor.data.summary) {
+              throw "doctor JSON 不符合合同"
+            }
+            if ($doctor.code -ne $doctorCode -or $doctor.ok -ne ($doctorCode -eq 0)) {
+              throw "doctor JSON 与进程退出状态不一致"
+            }
+            $sandboxChecks = @($doctor.data.checks | Where-Object { $_.name -ceq "沙盒能力" })
+            if ($sandboxChecks.Count -ne 1) { throw "doctor 缺少唯一沙盒能力检查" }
+            $expectedDoctorCode = if ($doctor.data.summary.failures -gt 0) {
+              1
+            } elseif ($sandboxChecks[0].status -ceq "warning") {
+              31
+            } else {
+              0
+            }
+            if ($doctorCode -ne $expectedDoctorCode) {
+              throw "doctor 退出码与失败/信任降级决策不一致：$doctorCode != $expectedDoctorCode"
+            }
+            if ($sandboxChecks[0].status -cne "fail") {
+              throw "Windows 未建立 AppContainer supervisor 时必须明确报告沙盒能力失败"
+            }
+            if ($sandboxChecks[0].message -notmatch "实际等级：Experimental") {
+              throw "Windows doctor 未明确报告 Experimental：$($sandboxChecks[0].message)"
+            }
+            if ($sandboxChecks[0].message -match "实际(?:最高信任|等级)：Standard(?:；|$)") {
+              throw "Windows doctor 不得冒充 Standard"
+            }
+
+            & ./scripts/install.ps1 -Check
+            if ($LASTEXITCODE -ne 0) { throw "安装后更新检查失败" }
+            & ./scripts/install.ps1
+            if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "原子覆盖更新失败" }
+            if (@(Get-ChildItem -LiteralPath $installDir -Filter ".mindone.new.*" -Force).Count -ne 0) {
+              throw "原子覆盖更新残留暂存文件"
+            }
+
+            $marker = Join-Path $dataDir "models\preserve.marker"
+            New-Item -ItemType Directory -Path (Split-Path $marker) -Force | Out-Null
+            Set-Content -LiteralPath $marker -Encoding ascii -Value "preserve"
+            & ./scripts/uninstall.ps1 -Yes
+            if (Test-Path -LiteralPath $binary) { throw "默认卸载未删除 CLI" }
+            if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { throw "默认卸载误删数据" }
+            if ($env:Path -cne $pathBefore) { throw "默认卸载没有恢复当前进程 PATH" }
+            if ([Environment]::GetEnvironmentVariable("Path", "User") -cne $userPathBefore) {
+              throw "默认卸载没有恢复用户 PATH"
+            }
+
+            & ./scripts/install.ps1 -NoModifyPath
+            if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+              throw "-NoModifyPath 安装后缺少 CLI"
+            }
+            if ($env:Path -cne $pathBefore -or
+                [Environment]::GetEnvironmentVariable("Path", "User") -cne $userPathBefore) {
+              throw "-NoModifyPath 修改了当前进程或用户 PATH"
+            }
+            & ./scripts/uninstall.ps1 -Yes
+            if (Test-Path -LiteralPath $binary) { throw "-NoModifyPath 安装后的卸载未删除 CLI" }
+
+            $orphanState = Join-Path $dataDir "runtime\serve.json"
+            New-Item -ItemType Directory -Path (Split-Path $orphanState) -Force | Out-Null
+            Set-Content -LiteralPath $orphanState -Encoding ascii -Value "{}"
+            Assert-ScriptFails { & ./scripts/uninstall.ps1 -Yes -PurgeData } "缺少 CLI 时的服务状态保护"
+            if (-not (Test-Path -LiteralPath $orphanState -PathType Leaf)) {
+              throw "安全停止拒绝时误删服务状态"
+            }
+            Remove-Item -LiteralPath $orphanState -Force
+
+            $mismatchedState = Join-Path $dataDir "runtime\share.json"
+            New-Item -ItemType Directory -Path (Split-Path $mismatchedState) -Force | Out-Null
+            Set-Content -LiteralPath $mismatchedState -Encoding ascii -Value "{}"
+            Set-Content -LiteralPath $binary -Encoding ascii -Value "not a MindOne executable"
+            $mismatchedBefore = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash
+            Assert-ScriptFails { & ./scripts/uninstall.ps1 -Yes -PurgeData } "服务状态与伪造 CLI 不一致保护"
+            if (-not (Test-Path -LiteralPath $mismatchedState -PathType Leaf)) {
+              throw "服务/CLI 不一致拒绝时误删服务状态"
+            }
+            if ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash -cne $mismatchedBefore) {
+              throw "服务/CLI 不一致拒绝时修改了伪造 CLI"
+            }
+            Remove-Item -LiteralPath $binary, $mismatchedState -Force
+
+            & ./scripts/install.ps1
+            if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "重新安装失败" }
+
+            $env:MINDONE_HOME = [IO.Path]::GetPathRoot($dataDir)
+            Assert-ScriptFails { & ./scripts/uninstall.ps1 -Yes -PurgeData } "卷根目录保护"
+            if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "拒绝前已误删 CLI" }
+
+            $env:MINDONE_HOME = $env:USERPROFILE
+            Assert-ScriptFails { & ./scripts/uninstall.ps1 -Yes -PurgeData } "宽泛用户目录保护"
+            if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "拒绝前已误删 CLI" }
+
+            $env:MINDONE_HOME = "$dataDir\models\.."
+            Assert-ScriptFails { & ./scripts/uninstall.ps1 -Yes -PurgeData } "非规范路径保护"
+            if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "拒绝前已误删 CLI" }
+
+            $env:MINDONE_HOME = $dataDir
+            $foreign = Join-Path $dataDir "foreign.txt"
+            Set-Content -LiteralPath $foreign -Encoding ascii -Value "not-owned"
+            Assert-ScriptFails { & ./scripts/uninstall.ps1 -Yes -PurgeData } "非 MindOne 文件保护"
+            if (-not (Test-Path -LiteralPath $foreign -PathType Leaf)) { throw "拒绝时误删外部文件" }
+            Remove-Item -LiteralPath $foreign -Force
+
+            $junctionTarget = Join-Path $env:RUNNER_TEMP "mindone-junction-target"
+            $junctionPath = Join-Path $env:RUNNER_TEMP "mindone-junction-data"
+            New-Item -ItemType Directory -Path $junctionTarget -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $junctionTarget "sentinel.txt") -Encoding ascii -Value "keep"
+            New-Item -ItemType Junction -Path $junctionPath -Target $junctionTarget | Out-Null
+            $env:MINDONE_HOME = $junctionPath
+            Assert-ScriptFails { & ./scripts/uninstall.ps1 -Yes -PurgeData } "重解析点保护"
+            if (-not (Test-Path -LiteralPath (Join-Path $junctionTarget "sentinel.txt"))) {
+              throw "重解析点拒绝时误删目标"
+            }
+            $env:MINDONE_HOME = $dataDir
+            $env:MINDONE_INSTALL_DIR = $junctionPath
+            Assert-ScriptFails { & ./scripts/install.ps1 -Check } "安装目录重解析点保护"
+            $env:MINDONE_INSTALL_DIR = $installDir
+            Remove-Item -LiteralPath $junctionPath -Force
+            Remove-Item -LiteralPath $junctionTarget -Recurse -Force
+
+            $parentTarget = Join-Path $env:RUNNER_TEMP "mindone-junction-parent-target"
+            $parentLink = Join-Path $env:RUNNER_TEMP "mindone-junction-parent-link"
+            New-Item -ItemType Directory -Path (Join-Path $parentTarget "bin") -Force | Out-Null
+            $parentSentinel = Join-Path $parentTarget "bin\sentinel.txt"
+            Set-Content -LiteralPath $parentSentinel -Encoding ascii -Value "keep"
+            New-Item -ItemType Junction -Path $parentLink -Target $parentTarget | Out-Null
+            $env:MINDONE_INSTALL_DIR = Join-Path $parentLink "bin"
+            Assert-ScriptFails { & ./scripts/install.ps1 -Check } "安装目录父链重解析点保护"
+            if (-not (Test-Path -LiteralPath $parentSentinel -PathType Leaf)) {
+              throw "父链重解析点拒绝时修改了真实目录"
+            }
+            $env:MINDONE_INSTALL_DIR = $installDir
+            Remove-Item -LiteralPath $parentLink -Force
+            Remove-Item -LiteralPath $parentTarget -Recurse -Force
+
+            $symlinkInstall = Join-Path $env:RUNNER_TEMP "mindone-target-symlink-install"
+            $symlinkVictim = Join-Path $env:RUNNER_TEMP "mindone-target-symlink-victim.exe"
+            New-Item -ItemType Directory -Path $symlinkInstall -Force | Out-Null
+            Set-Content -LiteralPath $symlinkVictim -Encoding ascii -Value "must-stay"
+            $symlinkTarget = Join-Path $symlinkInstall "mindone.exe"
+            New-Item -ItemType SymbolicLink -Path $symlinkTarget -Target $symlinkVictim | Out-Null
+            $env:MINDONE_INSTALL_DIR = $symlinkInstall
+            Assert-ScriptFails { & ./scripts/install.ps1 } "安装目标符号链接保护"
+            if ((Get-Content -LiteralPath $symlinkVictim -Raw).Trim() -cne "must-stay") {
+              throw "安装目标符号链接拒绝时修改了目标文件"
+            }
+            $env:MINDONE_INSTALL_DIR = $installDir
+            Remove-Item -LiteralPath $symlinkTarget, $symlinkVictim -Force
+            Remove-Item -LiteralPath $symlinkInstall -Force
+
+            $env:MINDONE_INSTALL_DIR = $env:USERPROFILE
+            Assert-ScriptFails { & ./scripts/install.ps1 -Check } "宽泛安装目录保护"
+            $env:MINDONE_INSTALL_DIR = $installDir
+
+            $foreignInstall = Join-Path $env:RUNNER_TEMP "mindone-foreign-install"
+            $foreignBinary = Join-Path $foreignInstall "mindone.exe"
+            New-Item -ItemType Directory -Path $foreignInstall -Force | Out-Null
+            Set-Content -LiteralPath $foreignBinary -Encoding ascii -Value "not a MindOne executable"
+            $foreignBefore = (Get-FileHash -LiteralPath $foreignBinary -Algorithm SHA256).Hash
+            $env:MINDONE_INSTALL_DIR = $foreignInstall
+            Assert-ScriptFails { & ./scripts/install.ps1 } "已有非 MindOne 目标保护"
+            $foreignAfter = (Get-FileHash -LiteralPath $foreignBinary -Algorithm SHA256).Hash
+            if ($foreignAfter -cne $foreignBefore) { throw "拒绝安装时覆盖了外部文件" }
+            $env:MINDONE_INSTALL_DIR = $installDir
+
+            # 未设置 MINDONE_HOME 时，必须解析控制配置中的实际 data_dir；默认卸载
+            # 保留实际数据和控制配置，PurgeData 同时删除两处。
+            Remove-Item Env:MINDONE_HOME -ErrorAction SilentlyContinue
+            $configuredData = Join-Path $testRoot "ConfiguredData"
+            $configuredMarker = Join-Path $configuredData "models\configured.marker"
+            New-Item -ItemType Directory -Path (Split-Path $configuredMarker) -Force | Out-Null
+            Set-Content -LiteralPath $configuredMarker -Encoding ascii -Value "configured-preserve"
+            Set-Content -LiteralPath (Join-Path $dataDir "config.toml") -Encoding utf8NoBOM `
+              -Value "data_dir = '$configuredData'"
+
+            & ./scripts/uninstall.ps1 -Yes
+            if (Test-Path -LiteralPath $binary) { throw "自定义 data_dir 默认卸载未删除 CLI" }
+            if (-not (Test-Path -LiteralPath $configuredMarker -PathType Leaf)) {
+              throw "自定义 data_dir 默认卸载误删实际数据"
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $dataDir "config.toml") -PathType Leaf)) {
+              throw "自定义 data_dir 默认卸载误删控制配置"
+            }
+
+            & ./scripts/install.ps1
+            if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "自定义 data_dir 重装失败" }
+            & ./scripts/uninstall.ps1 -Yes -PurgeData
+            if (Test-Path -LiteralPath $binary) { throw "彻底卸载未删除 CLI" }
+            if (Test-Path -LiteralPath $configuredData) { throw "-PurgeData 未删除实际 data_dir" }
+            if (Test-Path -LiteralPath $dataDir) { throw "-PurgeData 未删除配置控制目录" }
+            if ($env:Path -cne $pathBefore) { throw "安装/卸载流程没有恢复当前进程 PATH" }
+            if ([Environment]::GetEnvironmentVariable("Path", "User") -cne $userPathBefore) {
+              throw "安装/卸载流程没有恢复用户 PATH"
+            }
+            if (@(Get-ChildItem -LiteralPath $testRoot -Filter ".mindone.new.*" -Recurse -Force -ErrorAction SilentlyContinue).Count -ne 0) {
+              throw "安装目录残留暂存文件"
+            }
+          }
+          finally {
+            [Environment]::SetEnvironmentVariable("Path", $userPathBefore, "User")
+            $env:Path = $pathBefore
+            if ($hadLocalAppData) {
+              $env:LOCALAPPDATA = $originalLocalAppData
+            }
+            else {
+              Remove-Item Env:LOCALAPPDATA -ErrorAction SilentlyContinue
+            }
+            if ($null -ne $server -and -not $server.HasExited) {
+              Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+  real-e2e:
+    name: 真实 llama.cpp / GGUF 双账号端到端
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs:
+      - quality
+      - postgres-integration
+      - linux-sandbox-gate
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: real-e2e-qwen3-llama-b10064
+
+      - name: 准备真实 Linux 沙盒与用户凭证库
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap keyutils
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --proc /proc --dev /dev /bin/true
+
+      - name: 运行冻结版本真实端到端
+        shell: bash
+        env:
+          MINDONE_E2E_PROFILE: release
+          MINDONE_E2E_CPU_ONLY: "1"
+          MINDONE_E2E_LLAMA_VERSION: b10064
+          MINDONE_E2E_MODEL_REPO: ggml-org/Qwen3-0.6B-GGUF
+          MINDONE_E2E_MODEL_FILE: Qwen3-0.6B-Q4_0.gguf
+          MINDONE_E2E_MODEL_SHA256: da2572f16c06133561ce56accaa822216f2391ef4d37fba427801cd6736417d4
+        run: |
+          set -euo pipefail
+          keyctl session mindone-ci-e2e scripts/e2e-test.sh

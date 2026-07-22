@@ -1,0 +1,46 @@
+[package]
+name = "mindone-engine"
+description = "MindOne 模型安全验证、引擎安装、硬件探测与受管推理进程"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+fs2.workspace = true
+flate2.workspace = true
+futures-util.workspace = true
+hex.workspace = true
+mindone-sandbox.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sysinfo.workspace = true
+tempfile.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+zip.workspace = true
+zstd.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+same-file = "=1.0.6"
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

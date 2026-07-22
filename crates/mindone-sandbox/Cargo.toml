@@ -1,0 +1,37 @@
+[package]
+name = "mindone-sandbox"
+description = "MindOne 跨平台沙盒能力探测、启动计划与远程证明验证"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+hex.workspace = true
+mindone-protocol = { path = "../mindone-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.5"
+libc.workspace = true
+seccompiler = "0.5.0"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+win32job = "=2.0.3"
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

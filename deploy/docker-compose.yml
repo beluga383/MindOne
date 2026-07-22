@@ -1,0 +1,197 @@
+name: mindone
+
+services:
+  postgres:
+    # Docker Official Image 多架构 index digest；更新流程见 docs/OPERATIONS.md。
+    image: postgres:17-bookworm@sha256:4f736ae292687621d4dbe0d499ffd024a36bd2ee7d8ca6f2ccd4c800f047b394
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mindone
+      POSTGRES_USER: mindone
+      POSTGRES_PASSWORD: ${MINDONE_POSTGRES_PASSWORD:?请在 deploy/.env 中设置数据库密码}
+    entrypoint:
+      - /bin/sh
+      - /usr/local/lib/mindone/postgres-tls-entrypoint.sh
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
+      - -c
+      - ssl_cert_file=/run/mindone-postgres-tls/server.crt
+      - -c
+      - ssl_key_file=/run/mindone-postgres-tls/server.key
+      - -c
+      - ssl_ca_file=/run/mindone-postgres-tls/ca.crt
+      - -c
+      - hba_file=/usr/local/etc/postgresql/mindone-pg_hba.conf
+    volumes:
+      - mindone-postgres:/var/lib/postgresql/data
+      - ./postgres-tls-entrypoint.sh:/usr/local/lib/mindone/postgres-tls-entrypoint.sh:ro
+      - ./postgres-pg_hba.conf:/usr/local/etc/postgresql/mindone-pg_hba.conf:ro
+    secrets:
+      - source: postgres_ca
+        target: mindone_postgres_ca
+      - source: postgres_server_cert
+        target: mindone_postgres_server_cert
+      - source: postgres_server_key
+        target: mindone_postgres_server_key
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$${POSTGRES_PASSWORD}" psql --no-psqlrc
+          'host=127.0.0.1 port=5432 dbname=mindone user=mindone sslmode=verify-full sslrootcert=/run/mindone-postgres-tls/ca.crt'
+          --tuples-only --command 'SELECT 1' >/dev/null
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /run/mindone-postgres-tls:size=1m,mode=0700
+
+  database-role-init:
+    # 每次迁移后以 owner 身份幂等创建/轮换固定 runtime role 并刷新对象授权。
+    image: postgres:17-bookworm@sha256:4f736ae292687621d4dbe0d499ffd024a36bd2ee7d8ca6f2ccd4c800f047b394
+    restart: "no"
+    depends_on:
+      database-migrator:
+        condition: service_completed_successfully
+    entrypoint:
+      - /bin/sh
+      - /usr/local/lib/mindone/postgres-ensure-runtime-role.sh
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: mindone
+      PGUSER: mindone
+      PGPASSWORD: ${MINDONE_POSTGRES_PASSWORD:?请在 deploy/.env 中设置数据库 owner 密码}
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /run/secrets/mindone_postgres_ca
+      PGCONNECT_TIMEOUT: "10"
+      MINDONE_POSTGRES_APP_PASSWORD: ${MINDONE_POSTGRES_APP_PASSWORD:?请在 deploy/.env 中设置独立 runtime 数据库密码}
+    volumes:
+      - ./postgres-ensure-runtime-role.sh:/usr/local/lib/mindone/postgres-ensure-runtime-role.sh:ro
+    networks:
+      - backend
+    secrets:
+      - source: postgres_ca
+        target: mindone_postgres_ca
+    user: postgres
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=1m,mode=1777
+
+  database-migrator:
+    # 仅 owner 执行 schema/旧数据迁移；常驻 coordinator 不持有 DDL owner 凭据。
+    image: ${MINDONE_COORDINATOR_IMAGE:-mindone-coordinator:local}
+    restart: "no"
+    command:
+      - database-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MINDONE_ENV: production
+      MINDONE_BIND: 127.0.0.1:8787
+      MINDONE_ALLOW_NON_LOOPBACK: "false"
+      DATABASE_URL: postgres://mindone:${MINDONE_POSTGRES_PASSWORD:?请在 deploy/.env 中设置数据库 owner 密码}@postgres:5432/mindone?sslmode=verify-full&sslrootcert=/run/secrets/mindone_postgres_ca
+      MINDONE_AUTH_PROVIDER: github
+      MINDONE_GITHUB_CLIENT_ID: ${MINDONE_GITHUB_CLIENT_ID:?请设置 GitHub OAuth Client ID}
+      MINDONE_TOKEN_PEPPER: ${MINDONE_TOKEN_PEPPER:?请设置至少 32 字符的令牌 pepper}
+      MINDONE_STANDARD_DATA_KEY_FILE: /run/secrets/mindone_standard_data_key
+      MINDONE_EVALUATION_DRAW_DENOMINATOR: ${MINDONE_EVALUATION_DRAW_DENOMINATOR:-8}
+      MINDONE_EVALUATION_INSTANCE_COOLDOWN_SECONDS: ${MINDONE_EVALUATION_INSTANCE_COOLDOWN_SECONDS:-60}
+      MINDONE_TRUSTED_PROXY_IPS: 127.0.0.1,::1
+      RUST_LOG: ${RUST_LOG:-mindone_coordinator=info,tower_http=info,sqlx=warn}
+    networks:
+      - backend
+    secrets:
+      - source: postgres_ca
+        target: mindone_postgres_ca
+      - source: standard_data_key
+        target: mindone_standard_data_key
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+  coordinator:
+    # 质量运维 one-shot 服务复用同一镜像，避免源码目录变化造成二进制漂移。
+    image: ${MINDONE_COORDINATOR_IMAGE:-mindone-coordinator:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      database-migrator:
+        condition: service_completed_successfully
+      database-role-init:
+        condition: service_completed_successfully
+    environment:
+      MINDONE_ENV: production
+      MINDONE_BIND: 0.0.0.0:8787
+      MINDONE_ALLOW_NON_LOOPBACK: "true"
+      DATABASE_URL: postgres://mindone_app:${MINDONE_POSTGRES_APP_PASSWORD:?请在 deploy/.env 中设置独立 runtime 数据库密码}@postgres:5432/mindone?sslmode=verify-full&sslrootcert=/run/secrets/mindone_postgres_ca
+      MINDONE_AUTH_PROVIDER: github
+      MINDONE_GITHUB_CLIENT_ID: ${MINDONE_GITHUB_CLIENT_ID:?请设置 GitHub OAuth Client ID}
+      MINDONE_TOKEN_PEPPER: ${MINDONE_TOKEN_PEPPER:?请设置至少 32 字符的令牌 pepper}
+      MINDONE_STANDARD_DATA_KEY_FILE: /run/secrets/mindone_standard_data_key
+      MINDONE_EVALUATION_DRAW_DENOMINATOR: ${MINDONE_EVALUATION_DRAW_DENOMINATOR:-8}
+      MINDONE_EVALUATION_INSTANCE_COOLDOWN_SECONDS: ${MINDONE_EVALUATION_INSTANCE_COOLDOWN_SECONDS:-60}
+      # 基础 Compose 不信任宿主机网关；公网 overlay 会替换为专用 connector 固定 IP。
+      MINDONE_TRUSTED_PROXY_IPS: 127.0.0.1,::1
+      RUST_LOG: ${RUST_LOG:-mindone_coordinator=info,tower_http=info,sqlx=warn}
+    ports:
+      - "127.0.0.1:${MINDONE_COORDINATOR_HOST_PORT:-18787}:8787"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8787/ready"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    networks:
+      - backend
+      - edge
+    secrets:
+      - source: postgres_ca
+        target: mindone_postgres_ca
+      - source: standard_data_key
+        target: mindone_standard_data_key
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+networks:
+  backend:
+    internal: true
+  edge:
+
+volumes:
+  mindone-postgres:
+
+secrets:
+  postgres_ca:
+    file: ${MINDONE_POSTGRES_TLS_DIR:-./secrets/postgres-tls}/ca.crt
+  postgres_server_cert:
+    file: ${MINDONE_POSTGRES_TLS_DIR:-./secrets/postgres-tls}/server.crt
+  postgres_server_key:
+    file: ${MINDONE_POSTGRES_TLS_DIR:-./secrets/postgres-tls}/server.key
+  standard_data_key:
+    file: ${MINDONE_STANDARD_DATA_KEY_FILE:-./secrets/standard-data-key}
