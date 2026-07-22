@@ -478,6 +478,19 @@ mod tests {
     }
 
     #[test]
+    fn deployed_migration_14_checksum_remains_immutable() {
+        let migration = MIGRATOR
+            .iter()
+            .find(|migration| migration.version == 14)
+            .expect("应内嵌已部署的 migration 14");
+        assert_eq!(
+            hex::encode(migration.checksum.as_ref()),
+            "3f7610c0380e8cc394a4aa1b96a7af0664713a2e58b53281d67c959126b88ace0b6586cb41a7ea42d809ba403d4a6563",
+            "已部署 migration 的空行、注释和 SQL 均属于不可变校验和；后续变化必须新增 migration"
+        );
+    }
+
+    #[test]
     fn private_hmac_key_commitment_is_domain_separated_and_deterministic() {
         let config = test_config();
         let key = config

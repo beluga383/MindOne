@@ -17,7 +17,7 @@
 ## 2. 已确认现实边界
 
 - 当前工作分支为 `codex/complete-cli-mvp-v1`；源码已推进到连续 39 个 migration（`0001..0039`）。0038 固化 fast/standard/slow 任务档位，0039 增加 inference-only API Key 与只追加事件。
-- fresh-v37 `43/43` 与 workspace `556/0/5` 是 0038/0039、模型目录和公网网关之前的历史证据。当前树已通过 workspace `588/0/5`，并在一次性 PostgreSQL 17 上让 16 个 binary 各用独立数据库完成 fresh-v39 `49/49`、无 skip；公网 E2E 仍未回填。
+- fresh-v37 `43/43` 与 workspace `556/0/5` 是 0038/0039、模型目录和公网网关之前的历史证据。当前树已通过 workspace `589/0/5`，并在一次性 PostgreSQL 17 上让 16 个 binary 各用独立数据库完成 fresh-v39 `49/49`、无 skip；公网 E2E 仍未回填。
 - 当前 debug 工作树的隔离 CPU-only E2E 已使用 fresh PostgreSQL v37、两个账号/device、真实 llama.cpp `b10064` 与 `Qwen3-0.6B-Q4_0.gguf` 从头退出 0；当前平台安装发行 smoke 也已通过。上述结果仍不等于正式发布门禁，多平台构建、外部 Actions、签名、SMTP、真实 TEE、private 双 GGUF 和 production 均另列待验证。
 - 本机 live production 是受保护的 v26 实例，不是 v39 验收环境；在完成维护窗口、无活动租约检查、旧节点 device rebind、独立 HMAC key/完整预算和回滚方案前不得升级或扰动。
 - private `global_reserve_entries` 的跨 catalog 核心算法已实现：availability 前持有全局 advisory transaction lock，并按受控 catalog 目录全部 entry 的 legacy/v2 唯一冲突键并集计算 remaining。不同 catalog 真重叠、两个独立 `PgPool` 的回归已进入 fresh-v37 `43/43` 强制 PostgreSQL gate。
@@ -133,7 +133,7 @@
 
 ## 7. 当前剩余门禁顺序
 
-1. 当前工作树已通过 fmt、全 workspace all-target/all-feature check/strict Clippy 与全 workspace tests；31 个 result set 为 `588 passed / 0 failed / 5 ignored`。fresh-v39 16 个 binary 为 `49/49`、无 skip。
+1. 当前工作树已通过 fmt、全 workspace all-target/all-feature check/strict Clippy 与全 workspace tests；31 个 result set 为 `589 passed / 0 failed / 5 ignored`。fresh-v39 16 个 binary 为 `49/49`、无 skip。
 2. 当前 debug 隔离真实 GGUF E2E、日志泄露扫描、结算与清理闭环已通过，覆盖 chat、`/v1/completions` 与两端点 Standard SSE；后续修改引擎、worker、代理、SSE 或结算路径时重跑。
 3. 当前 `mindone 1.0.0` / `aarch64-apple-darwin` 二进制的归档 SHA-256、安装、`--check`、重装、中文帮助/版本、doctor、默认保留与 purge 卸载已通过；发行相关源码再改动时必须重跑。
 4. 完成 ModelScope 真实公网 artifact smoke、外部 SMTP/浏览器/CLI 签名 poll 和 private 双 GGUF harness，或继续明确标为未验证。

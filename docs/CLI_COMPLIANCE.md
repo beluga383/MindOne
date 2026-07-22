@@ -14,11 +14,11 @@
 
 各功能行保留的是最近一次与该行为直接相关的证据；是否已经满足**当前工作树**的最终发布门禁，以第 0 节和第 13 节为准。当前源码为连续 `0001..0039`：`0038` 增加三档任务速度，`0039` 增加 HMAC-only 推理 API Key 及只追加审计事件。本机 live production 仍停留在已经验证的 26 个 migration；下文 fresh-v36/v37 和 workspace `556/0/5` 均是新增 0038/0039 前的历史阶段证据，不能冒充当前全量门禁。
 
-## 0. 当前证据快照（2026-07-22）
+## 0. 当前证据快照（2026-07-23）
 
 | 已实际运行的命令/检查 | 结果 | 未覆盖内容 |
 |---|---|---|
-| 当前 workspace fmt/check/strict Clippy/tests | macOS 主机全 workspace all-target/all-feature check 和 `-D warnings` 退出 0；全 workspace 31 个 result set 为 `588 passed / 0 failed / 5 ignored`。Windows x86_64 MSVC 交叉环境也已完成全 workspace/all-target/all-feature check 与严格 Clippy | macOS 为本机；Windows 为交叉编译且仍待原生 Actions；ignored 保留外部资源/平台门禁 |
+| 当前 workspace fmt/check/strict Clippy/tests | macOS 主机全 workspace all-target/all-feature check 和 `-D warnings` 退出 0；全 workspace 31 个 result set 为 `589 passed / 0 failed / 5 ignored`。Windows x86_64 MSVC 交叉环境也已完成全 workspace/all-target/all-feature check 与严格 Clippy | macOS 为本机；Windows 为交叉编译且仍待原生 Actions；ignored 保留外部资源/平台门禁 |
 | 当前 CLI/TUI 完整门禁 | CLI lib `174 passed / 0 failed / 1 ignored`；40 叶子/10 分类精确对等、多端口与平台资产映射均通过 | 回环/真实 macOS capability 测试须在未受额外沙箱限制的本机运行；已退出 worker 的回收测试先确定性等待并回收子进程，再验证启动失败合同，不再依赖 2 秒调度窗口 |
 | 历史 workspace fmt/check/strict Clippy/tests | 29 个 result set 合计 `556 passed / 0 failed / 5 ignored`，退出 0 | 早于 0038/0039、模型目录与公网网关，仅作基线 |
 | 历史 fresh PostgreSQL `mindone_gate_0036_full_20260719b` 上的 13 个 coordinator integration binary | 合计 `41/41`、无 skip；sqlx metadata `36|1|36|t` | 只证明历史 v36；证据库必须保留，不得复用或清理 |
@@ -27,7 +27,7 @@
 | Shell / release 安装卸载 smoke | 当前 `mindone 1.0.0` / `aarch64-apple-darwin` 二进制已通过归档 SHA-256、安装、`--check`、重装、中文帮助/版本、doctor JSON、默认保留数据卸载与 purge | 仅为本机 unsigned local smoke；不替代 GitHub Release、Actions、SBOM、Sigstore 或平台签名 |
 | RustSec、cargo-deny、Gitleaks、actionlint | 当前树使用 cargo-audit 0.22.2 联网刷新到 1167 条 advisory 后扫描 489 个 lockfile 依赖，0 vulnerability / 0 warning；`cargo deny check` 与 actionlint 1.7.12 退出 0，3 个 workflow YAML 均可解析；Gitleaks 8.30.1 对排除本机构建缓存后的 237 个实际项目文件（约 4.38 MB）扫描通过。TUI 已升级到 ratatui 0.30.2 / crossterm 0.29，移除旧 `lru 0.12.5` 与 `paste`，advisory ignore 为空 | 依赖数据库已在本轮刷新；独立 GitHub Actions workflow 尚未实际运行 |
 | Compose 静态配置门禁 | base、Cloudflare public overlay、quality operator overlay、dev 的规范化 Compose 断言全部通过，4/4 | 只证明当前配置结构；专用 Cloudflare tunnel、hostname 与公网请求仍待用户确认后的外部验证 |
-| 本机 production 备份、升级与切换 | 生产备份已校验并隔离恢复；真实 v17 数据经隔离 `17→26` 演练通过；live migration 为 `26|1|26|t` | 这是 live production v26 的既有证据，不表示当前 v39 源码已经部署 |
+| 本机 production 备份、升级与切换 | 当前 v26 custom dump 已校验 328 项 TOC 并恢复到独立 PostgreSQL 17；修复 migration 14 末尾空行 checksum 漂移后，恢复副本真实 `26→39` 成功，metadata `39|1|39|t`，0037/0038/0039 对象与零业务行保持均已核对；live 仍为 `26|1|26|t` | live coordinator 尚未停止、迁移或切换；短时 API 中断需单独明确确认，不能把恢复副本冒充 production |
 | `scripts/e2e-test.sh` | 四槽改动前的 debug 隔离 CPU-only E2E 从头退出 0：fresh PostgreSQL v37、两个隔离 Home/账号/device、官方 llama.cpp b10064、Qwen3-0.6B-Q4_0 GGUF、确定性 public canary worker 终态、chat/completions 非流式、两类 SSE、游标故障恢复、Standard 密文、三轨唯一结算、执行前策略改变拒绝零结算、Regulated `stream:true` 拒绝、Prompt/Response 日志扫描和安全清理 | 仅为历史本机 debug、单 Standard GGUF；本轮按要求只保留下载启动探测，四槽/统一 KV argv 发布前须复用小模型重跑 |
 
 ## 1. 全局 CLI 合同
@@ -248,7 +248,7 @@
 
 | 验收 | 必须取得的证据 | 当前状态 |
 |---|---|---|
-| 最终 fmt、strict clippy、workspace tests | 当前 31 个 result set 为 `588 passed / 0 failed / 5 ignored`，退出 0；macOS 本机与 Windows x86_64 MSVC 交叉环境的全 workspace check/strict Clippy 均通过 | 5 ignored 是外部/平台门禁，不冒充通过；Windows 原生、Linux/macOS Actions 仍待外部验证 |
+| 最终 fmt、strict clippy、workspace tests | 当前 31 个 result set 为 `589 passed / 0 failed / 5 ignored`，退出 0；macOS 本机与 Windows x86_64 MSVC 交叉环境的全 workspace check/strict Clippy 均通过 | 5 ignored 是外部/平台门禁，不冒充通过；Windows 原生、Linux/macOS Actions 仍待外部验证 |
 | Rust 1.88 MSRV | 当前 all-target/all-feature check 已通过 | Linux/Windows/macOS Actions 仍待外部验证 |
 | PostgreSQL migrations、最小权限角色与完整 API 集成 | 当前源码连续 `0001..0039`；fresh-v39 16 个 binary 各用独立数据库，合计 `49/49`、无 skip，覆盖最小 ACL、速度档调度与 API Key/OpenAI JSON + Standard SSE 网关 E2E | live production 仍为 `26|1|26|t`，严禁把测试结果冒充 production 切换 |
 | 两个隔离 Home 的真实 llama.cpp + GGUF E2E | 四槽改动前的 debug 树以官方 llama.cpp b10064 和 Qwen3-0.6B-Q4_0 GGUF 完成 PostgreSQL v37、双账号/device、public canary、非流式双端点、两类 SSE、游标恢复、密文、三轨唯一结算、策略拒绝零结算、Regulated 流式拒绝、slot erase、日志扫描与清理 | 历史本机单 Standard GGUF 已通过；当前四槽/统一 KV argv、private 双 GGUF、真实 TEE、外部 SMTP、Actions、签名发布和 production 不在该证据内 |
@@ -261,4 +261,4 @@
 | 真实 SEV-SNP/TDX 证明与 Regulated E2E | 目标 guest 的真实 quote/report、厂商 collateral、固定 verifier、measurement allowlist、TEE adapter、密文推理与结果解密 | 待外部验证；软件测试通过不能替代 |
 | 分支推送、PR 与 GitHub Actions | PR URL、所有 required checks 绿色；不自动合并 | 待外部验证 |
 
-当前源码的 40 个公开叶子参数矩阵和 TUI 10 类映射已落盘并通过完整 CLI 与 workspace 门禁；HF 小模型部署目标的真实探测只读取 64 KiB 后断开。按端口并行运行多个本地受管实例已实现并通过状态隔离/在用保护的确定性测试，但没有为了测试再下载并启动第二个真实模型。当前 workspace `588/0/5`、fresh-v39 `49/49`、三个 Unix 用户态 release smoke、macOS Seatbelt、当前 Linux arm64 无网络 check/CLI tests/release PTY、隔离源码安装/裸命令 PTY smoke、Windows x86_64 MSVC check/strict Clippy/静态 release PE 审计与 API Key 网关 JSON/SSE 真实数据库 E2E 已通过；Windows 真机、Linux 四层真实沙盒/模型下载、公网 API 子域 TLS、外部 SMTP、签名发布、private 双 GGUF、真实 TEE 与 production 升级仍未完成。
+当前源码的 40 个公开叶子参数矩阵和 TUI 10 类映射已落盘并通过完整 CLI 与 workspace 门禁；HF 小模型部署目标的真实探测只读取 64 KiB 后断开。按端口并行运行多个本地受管实例已实现并通过状态隔离/在用保护的确定性测试，但没有为了测试再下载并启动第二个真实模型。当前 workspace `589/0/5`、fresh-v39 `49/49`、三个 Unix 用户态 release smoke、macOS Seatbelt、当前 Linux arm64 无网络 check/CLI tests/release PTY、隔离源码安装/裸命令 PTY smoke、Windows x86_64 MSVC check/strict Clippy/静态 release PE 审计与 API Key 网关 JSON/SSE 真实数据库 E2E 已通过；Windows 真机、Linux 四层真实沙盒/模型下载、公网 API 子域 TLS、外部 SMTP、签名发布、private 双 GGUF、真实 TEE 与 production live 切换仍未完成。

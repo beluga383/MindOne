@@ -11,3 +11,4 @@ ALTER TABLE job_attempts
 ALTER TABLE receipts
     ADD COLUMN contribution_weight_ppm INTEGER NOT NULL DEFAULT 1000000
         CHECK (contribution_weight_ppm BETWEEN 0 AND 1000000);
+
