@@ -10,9 +10,12 @@ if (-not $IsWindows) {
     throw "Windows PE 自包含检查只能在 Windows 上运行。"
 }
 
-$resolvedBinary = (Resolve-Path -LiteralPath $Binary -ErrorAction Stop).Path
-$binaryItem = Get-Item -LiteralPath $resolvedBinary -Force
-if ($binaryItem.PSIsContainer -or $binaryItem.LinkType) {
+$binaryItem = Get-Item -LiteralPath $Binary -Force -ErrorAction Stop
+$isReparsePoint = (
+    $binaryItem.Attributes -band [IO.FileAttributes]::ReparsePoint
+) -ne 0
+$resolvedBinary = $binaryItem.FullName
+if ($binaryItem.PSIsContainer -or $isReparsePoint) {
     throw "Windows PE 自包含检查要求普通文件，拒绝目录或重解析点：$resolvedBinary"
 }
 

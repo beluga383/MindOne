@@ -1927,7 +1927,7 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "mindone-accounting"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "hex",
  "serde",
@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "mindone-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "assert_cmd",
  "axum",
@@ -1990,7 +1990,7 @@ dependencies = [
 
 [[package]]
 name = "mindone-common"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "hex",
  "keyring",
@@ -2008,7 +2008,7 @@ dependencies = [
 
 [[package]]
 name = "mindone-coordinator"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2050,7 +2050,7 @@ dependencies = [
 
 [[package]]
 name = "mindone-engine"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "async-trait",
  "flate2",
@@ -2080,7 +2080,7 @@ dependencies = [
 
 [[package]]
 name = "mindone-protocol"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64",
  "hex",
@@ -2096,7 +2096,7 @@ dependencies = [
 
 [[package]]
 name = "mindone-sandbox"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -2118,7 +2118,7 @@ dependencies = [
 
 [[package]]
 name = "mindone-sqlx"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "sqlx-core",
  "sqlx-postgres",

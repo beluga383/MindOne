@@ -21,7 +21,7 @@
 - 当前 debug 工作树的隔离 CPU-only E2E 已使用 fresh PostgreSQL v37、两个账号/device、真实 llama.cpp `b10064` 与 `Qwen3-0.6B-Q4_0.gguf` 从头退出 0；当前平台安装发行 smoke 也已通过。上述结果仍不等于正式发布门禁，多平台构建、外部 Actions、签名、SMTP、真实 TEE、private 双 GGUF 和 production 均另列待验证。
 - 本机 live production 是受保护的 v26 实例，不是 v39 验收环境；在完成维护窗口、无活动租约检查、旧节点 device rebind、独立 HMAC key/完整预算和回滚方案前不得升级或扰动。
 - private `global_reserve_entries` 的跨 catalog 核心算法已实现：availability 前持有全局 advisory transaction lock，并按受控 catalog 目录全部 entry 的 legacy/v2 唯一冲突键并集计算 remaining。不同 catalog 真重叠、两个独立 `PgPool` 的回归已进入 fresh-v37 `43/43` 强制 PostgreSQL gate。
-- GitHub 仓库、`main`、raw 安装器和 `v1.0.0` 标签已公开；首次 Actions 的 macOS/Windows 原生编译与依赖安全门禁成功，但整体 CI/Release 失败且尚无 Release 资产。当前树已经本地修复 Linux cfg、Runner 工具依赖和 PostgreSQL 夹具，仍须推送并取得新的外部全绿。Cloudflare 公网路由、正式签名和 production v26→v39 切换均没有完成证据。
+- GitHub 仓库、`main`、raw 安装器和旧 `v1.0.0` 标签已公开；旧标签不会强制移动。最新 Security workflow 已全绿，CI 已证明五个原生构建目标、核心质量、PostgreSQL、macOS Seatbelt 与 Linux 四层沙盒可以通过，并进一步暴露 Compose 父环境污染、Unix 非交互 PATH smoke、Windows PE hardlink 判定和真实 GGUF E2E 的 schema 37 漂移四个测试缺陷。当前树已升级为 `v1.0.1` 并逐项修复，仍须推送并取得新的完整外部全绿后再发行。Cloudflare 公网路由、正式签名和 production v26→v39 切换均没有完成证据。
 - 本机为 Apple Silicon macOS，只能报告真实的 `Standard-Limited`，不能伪造 Enhanced TEE。
 - GitHub OAuth App、Cloudflare 路由保存、账号验证码和系统权限属于需要用户确认的外部步骤。
 - `C_base` 已选择稳定合同 `server_reference_upper_bound_v1`：协调器按授权输入/输出上界和 operator 发布的不可变参考 profile，对 token、参考 GPU 时间、参考显存积分三个分项分别向上取整后求和。仓库不内置生产费率；具体 profile 数值仍必须由产品/运维通过审计 provisioning 决定，节点自报实际用量不进入金额。
@@ -135,7 +135,7 @@
 
 1. 当前工作树已通过 fmt、全 workspace all-target/all-feature check/strict Clippy 与全 workspace tests；31 个 result set 为 `589 passed / 0 failed / 5 ignored`。fresh-v39 16 个 binary 为 `49/49`、无 skip。
 2. 当前 debug 隔离真实 GGUF E2E、日志泄露扫描、结算与清理闭环已通过，覆盖 chat、`/v1/completions` 与两端点 Standard SSE；后续修改引擎、worker、代理、SSE 或结算路径时重跑。
-3. 当前 `mindone 1.0.0` / `aarch64-apple-darwin` 二进制的归档 SHA-256、安装、`--check`、重装、中文帮助/版本、doctor、默认保留与 purge 卸载已通过；发行相关源码再改动时必须重跑。
+3. 当前 `mindone 1.0.1` / `aarch64-apple-darwin` 二进制的归档 SHA-256、安装、`--check`、重装、中文帮助/版本、doctor、默认保留与 purge 卸载已通过；发行相关源码再改动时必须重跑。
 4. 完成 ModelScope 真实公网 artifact smoke、外部 SMTP/浏览器/CLI 签名 poll 和 private 双 GGUF harness，或继续明确标为未验证。
 5. 用户授权后再执行 GitHub/Actions、Cloudflare、公网端口审计和 production v26→v39 受控升级；正式 SNP/TDX、GPU 与签名仍各自需要真实外部证据。
 

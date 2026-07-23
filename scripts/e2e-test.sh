@@ -553,7 +553,19 @@ else
     COORDINATOR="$ROOT/target/debug/mindone-coordinator"
 fi
 [ -x "$CLI" ] && [ -x "$COORDINATOR" ] || die "构建未生成可执行文件"
-"$CLI" --version | grep -Eq '^mindone 1\.0\.0$' || die "CLI 版本不是 1.0.0"
+expected_version=$(awk '
+    $0 == "[workspace.package]" { section=1; next }
+    /^\[/ { section=0 }
+    section && $1 == "version" {
+        value=$3
+        gsub(/"/, "", value)
+        print value
+        exit
+    }
+' "$ROOT/Cargo.toml")
+[ -n "$expected_version" ] || die "无法读取 workspace 版本"
+[ "$("$CLI" --version)" = "mindone $expected_version" ] \
+    || die "CLI 版本与 workspace 版本不一致"
 
 step "启动隔离 PostgreSQL 17"
 docker run --detach --name "$DB_CONTAINER" \
@@ -614,8 +626,22 @@ wait_http_status "http://127.0.0.1:${COORDINATOR_PORT}/ready" 200 10 \
 migration_state=$(docker exec "$DB_CONTAINER" psql -U mindone -d mindone_e2e \
     -At -F '|' \
     -c 'SELECT COUNT(*)::bigint,MIN(version),MAX(version),COALESCE(BOOL_AND(success),FALSE) FROM _sqlx_migrations')
-[ "$migration_state" = '37|1|37|t' ] \
-    || die "迁移集合不完整（期望 37|1|37|t，实际 ${migration_state}）"
+latest_migration_version=$(
+    for migration_path in "$ROOT"/migrations/[0-9][0-9][0-9][0-9]_*.sql; do
+        migration_name=${migration_path##*/}
+        migration_version=${migration_name%%_*}
+        printf '%s\n' "$migration_version"
+    done | sort | tail -n 1 | sed 's/^0*//'
+)
+printf '%s\n' "$latest_migration_version" | grep -Eq '^[1-9][0-9]*$' \
+    || die "无法从 migration 文件推导最新版本"
+if [ -n "${MINDONE_EXPECTED_MIGRATION_VERSION:-}" ] \
+    && [ "$MINDONE_EXPECTED_MIGRATION_VERSION" != "$latest_migration_version" ]; then
+    die "CI migration 版本 ${MINDONE_EXPECTED_MIGRATION_VERSION} 与源码最新版本 ${latest_migration_version} 不一致"
+fi
+expected_migration_state="${latest_migration_version}|1|${latest_migration_version}|t"
+[ "$migration_state" = "$expected_migration_state" ] \
+    || die "迁移集合不完整（期望 ${expected_migration_state}，实际 ${migration_state}）"
 unauthorized_status=$(curl --silent --connect-timeout 2 --max-time 5 \
     --output /dev/null --write-out '%{http_code}' \
     "http://127.0.0.1:${COORDINATOR_PORT}/v1/quota/balance")

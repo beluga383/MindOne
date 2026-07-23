@@ -48,7 +48,10 @@ fn version_is_exact_release_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("1.0.0"));
+        .stdout(predicate::eq(format!(
+            "mindone {}\n",
+            env!("CARGO_PKG_VERSION")
+        )));
 }
 
 #[test]

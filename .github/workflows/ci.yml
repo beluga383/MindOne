@@ -1065,13 +1065,17 @@ jobs:
           cp target/release/mindone "$package_root/mindone"
           cp LICENSE "$package_root/LICENSE"
           printf '%s\n' 'CI 本机冒烟包；正式签名状态由 release.yml 生成。' > "$package_root/CODE_SIGNING.txt"
+          version_output=$(target/release/mindone --version)
+          printf '%s\n' "$version_output" | grep -Eq '^mindone [0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$'
+          ci_version=${version_output#mindone }
+          printf 'MINDONE_CI_VERSION=%s\n' "$ci_version" >> "$GITHUB_ENV"
           tar -C "$package_root" -czf "$release_root/mindone-x86_64-unknown-linux-gnu.tar.gz" \
             mindone LICENSE CODE_SIGNING.txt
           (
             cd "$release_root"
             sha256sum mindone-x86_64-unknown-linux-gnu.tar.gz > checksums.sha256
           )
-          printf 'v1.0.0\n' > "$release_root/release-version.txt"
+          printf 'v%s\n' "$ci_version" > "$release_root/release-version.txt"
 
       - name: 运行安装、版本、帮助、诊断与卸载
         shell: bash
@@ -1080,6 +1084,7 @@ jobs:
           release_root="$RUNNER_TEMP/mindone-release"
           test_home="$RUNNER_TEMP/mindone-clean-home"
           install_dir="$test_home/bin"
+          expected_version="mindone $MINDONE_CI_VERSION"
           mkdir -p "$test_home"
           python3 -m http.server 18081 --bind 127.0.0.1 --directory "$release_root" \
             >"$RUNNER_TEMP/mindone-release-http.log" 2>&1 &
@@ -1095,11 +1100,11 @@ jobs:
           MINDONE_RELEASE_URL=http://127.0.0.1:18081 \
           MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
             sh scripts/install.sh
-          "$install_dir/mindone" --version | grep -Fx 'mindone 1.0.0'
+          "$install_dir/mindone" --version | grep -Fx "$expected_version"
           "$install_dir/mindone" --help | grep -F 'MindOne'
           test "$(grep -Fxc '# >>> MindOne CLI PATH (managed) >>>' "$test_home/.bashrc")" -eq 1
           HOME="$test_home" PATH=/usr/bin:/bin bash --noprofile --rcfile "$test_home/.bashrc" \
-            -c 'mindone --version' | grep -Fx 'mindone 1.0.0'
+            -ic 'mindone --version' | grep -Fx "$expected_version"
           printf 'v0.9.0\n' > "$release_root/release-version.txt"
           if HOME="$test_home" \
              MINDONE_INSTALL_DIR="$install_dir" \
@@ -1109,15 +1114,16 @@ jobs:
             printf '%s\n' '安装器未拒绝默认降级' >&2
             exit 1
           fi
-          grep -F '拒绝把 MindOne 从 1.0.0 降级到 0.9.0' "$RUNNER_TEMP/downgrade.log"
-          "$install_dir/mindone" --version | grep -Fx 'mindone 1.0.0'
+          grep -F "拒绝把 MindOne 从 $MINDONE_CI_VERSION 降级到 0.9.0" \
+            "$RUNNER_TEMP/downgrade.log"
+          "$install_dir/mindone" --version | grep -Fx "$expected_version"
           HOME="$test_home" \
           MINDONE_INSTALL_DIR="$install_dir" \
           MINDONE_RELEASE_URL=http://127.0.0.1:18081 \
           MINDONE_INSTALL_ALLOW_LOOPBACK_HTTP=1 \
             sh scripts/install.sh --check \
-              | grep -F '已安装版本 1.0.0 高于所查发行版 0.9.0'
-          printf 'v1.0.0-rc.1\n' > "$release_root/release-version.txt"
+              | grep -F "已安装版本 $MINDONE_CI_VERSION 高于所查发行版 0.9.0"
+          printf 'v%s-rc.1\n' "$MINDONE_CI_VERSION" > "$release_root/release-version.txt"
           if HOME="$test_home" \
              MINDONE_INSTALL_DIR="$install_dir" \
              MINDONE_RELEASE_URL=http://127.0.0.1:18081 \
@@ -1126,9 +1132,9 @@ jobs:
             printf '%s\n' '安装器未按 SemVer 拒绝从正式版降级到预发布版' >&2
             exit 1
           fi
-          grep -F '拒绝把 MindOne 从 1.0.0 降级到 1.0.0-rc.1' \
+          grep -F "拒绝把 MindOne 从 $MINDONE_CI_VERSION 降级到 $MINDONE_CI_VERSION-rc.1" \
             "$RUNNER_TEMP/prerelease-downgrade.log"
-          printf 'v1.0.0\n' > "$release_root/release-version.txt"
+          printf 'v%s\n' "$MINDONE_CI_VERSION" > "$release_root/release-version.txt"
           doctor_code=0
           HOME="$test_home" MINDONE_HOME="$test_home/data" \
             "$install_dir/mindone" doctor --json > "$RUNNER_TEMP/doctor.json" || doctor_code=$?
@@ -1184,7 +1190,7 @@ jobs:
               cd "$case_dir"
               sha256sum "$artifact" > checksums.sha256
             )
-            printf 'v1.0.0\n' > "$case_dir/release-version.txt"
+            printf 'v%s\n' "$MINDONE_CI_VERSION" > "$case_dir/release-version.txt"
           }
 
           prepare_package duplicate
@@ -1380,8 +1386,15 @@ jobs:
           $digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           Set-Content -LiteralPath (Join-Path $releaseRoot "checksums.sha256") -Encoding ascii `
             -Value "$digest *$artifact"
+          $versionOutput = (& (Join-Path $packageRoot "mindone.exe") --version 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '^mindone ([0-9]+\.[0-9]+\.[0-9]+(?:[+-][0-9A-Za-z.-]+)?)$') {
+            throw "Windows CLI 版本输出不符合合同：$versionOutput"
+          }
+          $ciVersion = $Matches[1]
+          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 `
+            -Value "MINDONE_CI_VERSION=$ciVersion"
           Set-Content -LiteralPath (Join-Path $releaseRoot "release-version.txt") -Encoding ascii `
-            -Value "v1.0.0"
+            -Value "v$ciVersion"
 
       - name: 验证安装、版本、帮助、doctor、拒绝边界与卸载
         shell: pwsh
@@ -1405,6 +1418,9 @@ jobs:
           }
 
           $releaseRoot = Join-Path $env:RUNNER_TEMP "mindone-windows-release"
+          $ciVersion = $env:MINDONE_CI_VERSION
+          if ([string]::IsNullOrWhiteSpace($ciVersion)) { throw "缺少 CI 版本" }
+          $expectedVersion = "mindone $ciVersion"
           $testRoot = Join-Path $env:RUNNER_TEMP "mindone-windows-clean-home"
           $hadLocalAppData = Test-Path Env:LOCALAPPDATA
           $originalLocalAppData = if ($hadLocalAppData) { $env:LOCALAPPDATA } else { $null }
@@ -1451,30 +1467,30 @@ jobs:
             throw "安装器没有把安装目录写入用户 PATH"
           }
           $bareVersion = (& mindone --version 2>&1 | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0 -or $bareVersion -cne "mindone 1.0.0") {
+          if ($LASTEXITCODE -ne 0 -or $bareVersion -cne $expectedVersion) {
             throw "安装后裸 mindone 无法解析：$bareVersion"
           }
 
             $version = (& $binary --version 2>&1 | Out-String).Trim()
-            if ($LASTEXITCODE -ne 0 -or $version -cne "mindone 1.0.0") {
+            if ($LASTEXITCODE -ne 0 -or $version -cne $expectedVersion) {
               throw "版本输出不符合合同：$version"
             }
             Set-Content -LiteralPath (Join-Path $releaseRoot "release-version.txt") -Encoding ascii `
               -Value "v0.9.0"
             Assert-ScriptFails { & ./scripts/install.ps1 } "默认降级保护"
             $versionAfterRefusal = (& $binary --version 2>&1 | Out-String).Trim()
-            if ($LASTEXITCODE -ne 0 -or $versionAfterRefusal -cne "mindone 1.0.0") {
+            if ($LASTEXITCODE -ne 0 -or $versionAfterRefusal -cne $expectedVersion) {
               throw "拒绝降级时修改了现有版本：$versionAfterRefusal"
             }
             $downgradeCheck = (& ./scripts/install.ps1 -Check | Out-String)
-            if ($downgradeCheck -notmatch "已安装版本 1.0.0 高于所查发行版 0.9.0") {
+            if ($downgradeCheck -notmatch "已安装版本 $([regex]::Escape($ciVersion)) 高于所查发行版 0.9.0") {
               throw "更新检查错误地把较旧发行版报告成可更新：$downgradeCheck"
             }
             Set-Content -LiteralPath (Join-Path $releaseRoot "release-version.txt") -Encoding ascii `
-              -Value "v1.0.0-rc.1"
+              -Value "v$ciVersion-rc.1"
             Assert-ScriptFails { & ./scripts/install.ps1 } "正式版到预发布版的 SemVer 降级保护"
             Set-Content -LiteralPath (Join-Path $releaseRoot "release-version.txt") -Encoding ascii `
-              -Value "v1.0.0"
+              -Value "v$ciVersion"
             $help = (& $binary --help 2>&1 | Out-String)
             if ($LASTEXITCODE -ne 0 -or $help -notmatch "MindOne" -or $help -notmatch "用法") {
               throw "中文帮助冒烟失败"

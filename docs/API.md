@@ -1,6 +1,6 @@
 # MindOne 协调服务器 API
 
-版本：v1.0.0<br>
+版本：v1.0.1<br>
 本地开发基址：`http://127.0.0.1:8787`<br>
 目标公网基址：`https://api.holarchic.cn`；根域 `https://holarchic.cn` 保留现有官网，只有部署方完成 API 子域的 Cloudflare、TLS、鉴权和端口审计后才可声明实际上线
 
