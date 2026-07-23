@@ -1,4 +1,4 @@
-# MindOne CLI v1.0.0 合规矩阵
+# MindOne CLI v1.0.2 合规矩阵
 
 本文件覆盖 `docs/specs/mindone_cli_1.0.0.md` 与总任务的并集；冲突时以总任务为准。这里记录的是当前源码与已经取得的证据，不把“代码存在”写成“验收通过”。
 
@@ -24,7 +24,7 @@
 | 历史 fresh PostgreSQL `mindone_gate_0036_full_20260719b` 上的 13 个 coordinator integration binary | 合计 `41/41`、无 skip；sqlx metadata `36|1|36|t` | 只证明历史 v36；证据库必须保留，不得复用或清理 |
 | 当前 migration / fresh v39 数据库 | migration 文件连续 `0001..0039`；一次性 PostgreSQL 17 上 16 个 binary 各用独立数据库，合计 `49/49`、无 skip；持久库 metadata `39|1|39|t` | 独立数据库避免 `database_role` 的故意错误 HMAC commitment 污染其他 binary；不替代 production 升级 |
 | macOS Seatbelt ignored/env-gated gate | 当前显式运行 `MINDONE_REAL_SEATBELT_TEST=1` 为 1/1 passed，覆盖允许目标写入、拒绝越权写入和拒绝 sibling 模型；普通 workspace 测试仍保持 ignored | 当前本机真实门禁通过；仍需 macOS Actions 在干净 runner 复验 |
-| Shell / release 安装卸载 smoke | 当前 `mindone 1.0.2` / `aarch64-apple-darwin` 二进制已通过归档 SHA-256、安装、`--check`、重装、中文帮助/版本、doctor JSON、默认保留数据卸载与 purge | 仅为本机 unsigned local smoke；不替代 GitHub Release、Actions、SBOM、Sigstore 或平台签名 |
+| Shell / release 安装卸载 smoke | 当前 `mindone 1.0.2` / `aarch64-apple-darwin` 二进制已通过归档 SHA-256、安装、`--check`、重装、中文帮助/版本、doctor JSON、默认保留数据卸载与 purge；公开 latest 资产又在隔离目录完成远程安装和真实 80×24 PTY 裸 TUI 渲染/退出 | v1.0.2 Release、五平台资产、SBOM、Sigstore 与 provenance 已另行验证；Apple/Windows 平台原生签名仍未配置 |
 | RustSec、cargo-deny、Gitleaks、actionlint | 当前树使用 cargo-audit 0.22.2 联网刷新到 1167 条 advisory 后扫描 489 个 lockfile 依赖，0 vulnerability / 0 warning；`cargo deny check` 与 actionlint 1.7.12 退出 0，3 个 workflow YAML 均可解析；Gitleaks 8.30.1 对排除本机构建缓存后的 237 个实际项目文件（约 4.38 MB）扫描通过。公开 Security workflow 的 RustSec、cargo-deny 与完整 Git 历史 Gitleaks 已在候选提交上 3/3 通过。TUI 已升级到 ratatui 0.30.2 / crossterm 0.29，移除旧 `lru 0.12.5` 与 `paste`，advisory ignore 为空 | 依赖数据库已在本轮刷新；正式发行仍要求标签所指精确提交的 Security 与 CI 同时全绿 |
 | Compose 静态配置门禁 | base、Cloudflare public overlay、quality operator overlay、dev 的规范化 Compose 断言全部通过，4/4 | 只证明当前配置结构；专用 Cloudflare tunnel、hostname 与公网请求仍待用户确认后的外部验证 |
 | 本机 production 备份、升级与切换 | 当前 v26 custom dump 已校验 328 项 TOC 并恢复到独立 PostgreSQL 17；修复 migration 14 末尾空行 checksum 漂移后，恢复副本真实 `26→39` 成功，metadata `39|1|39|t`，0037/0038/0039 对象与零业务行保持均已核对；live 仍为 `26|1|26|t` | live coordinator 尚未停止、迁移或切换；短时 API 中断需单独明确确认，不能把恢复副本冒充 production |
@@ -34,7 +34,7 @@
 
 | 规范项 | 真实实现 | 自动化证据 | 状态 |
 |---|---|---|---|
-| 根命令与版本 | `crates/mindone-cli/src/cli.rs`、workspace version `1.0.0` | `crates/mindone-cli/tests/cli_contract.rs` 中的 root help/version 用例 | 完成（本地自动测试） |
+| 根命令与版本 | `crates/mindone-cli/src/cli.rs`、workspace version `1.0.2` | `crates/mindone-cli/tests/cli_contract.rs` 中的 root help/version 用例 | 完成（本地自动测试） |
 | 全部帮助简体中文 | `crates/mindone-cli/src/cli.rs::localized_command` | `cli::tests::every_public_help_page_is_fully_localized` | 完成（本地自动测试） |
 | `-h` / `--help` / `-V` / `--version` | `crates/mindone-cli/src/cli.rs` | `cli_contract.rs`、`cli::tests::global_flags_work_after_subcommands` | 完成（本地自动测试） |
 | `--json` 稳定成功/错误 envelope | `crates/mindone-cli/src/output.rs`、`crates/mindone-common/src/error.rs` | `output::tests::{json_error_has_stable_contract,trust_downgrade_json_is_not_ok_and_preserves_complete_data}`、`cli_contract.rs::json_parse_error_uses_stable_contract_and_chinese_message` | 完成（本地自动测试） |
@@ -63,7 +63,7 @@
 | `model catalog` | 可选 `--query` | 65 项 HF 目标目录，下载位置为 client | 完成 |
 | `model recommend` | `--limit=3`，范围 1..=10 | 真实硬件探测与 70% 保守预算 | 完成 |
 | `model probe` | 必填目录模型；可选 `--deployment/--metadata-only/--branch/--file` | `--metadata-only` 只读 HF 清单；普通模式最多 64 KiB 后中止，均不落盘 | 确定性测试与 Qwen3-0.6B 公网探测通过；全目录纯元数据审计由 `scripts/audit-hf-model-catalog.sh` 显式执行 |
-| `model deploy` | `model=auto`；`--port=8080`；可选 `--replace` | 自动选择 GGUF、下载校验、安装引擎并健康启动 | 实现完成；只验证了下载开始，未重下完整模型 |
+| `model deploy` | `model=auto`；`--port=8080`；可选 `--replace` | 自动选择 GGUF、下载校验、安装引擎并健康启动 | 当前日常审计只做 Qwen3-0.6B 的 64 KiB 探测；公开 Linux E2E 已对同一小模型完成整包下载、验证、启动和业务链 |
 | `model download` | 必填 `--platform huggingface\|modelscope` 与 `--repo`；`--branch=main`；可选 `--name`、`--file`、`--sha256` 64-hex | TLS 下载、可信清单解析、哈希和格式验证；`1`/`21` | 本地确定性测试完成；ModelScope 真实公网 artifact 待外部 smoke |
 | `model delete` | 必填位置参数 `model`；`-y/--yes` 可选 | 在用保护、确认后删除真实文件与登记；`1`/`21` | 完成 |
 | `model verify` | 必填位置参数 `model` | 重算哈希与结构；`21` | 完成 |
@@ -140,14 +140,14 @@
 | `serve run` 默认 `127.0.0.1:8080`，已验证模型与绝对引擎路径 | `crates/mindone-cli/src/serve.rs`、`crates/mindone-engine/src/process.rs` | 参数边界、重定向拒绝；最终 E2E 在 127.0.0.1 启动真实 llama-server 并通过 `/health` | 完成（本机实测）；其他平台待 Actions |
 | CPU-only 是类型化受管策略，附加参数和环境不能覆盖 | `crates/mindone-cli/src/serve.rs`、`crates/mindone-engine/src/process.rs` | `ServeRequest.cpu_only` 单独传递；引擎统一注入 device/GPU layer/KV-op offload 禁用参数、清除对应环境覆盖，并对冲突附加参数失败关闭；定向测试、历史 E2E 与当前公开 Linux 四槽真实小模型链均已执行 | 类型化边界完成；GPU backend 仍待对应平台验证 |
 | 沙盒只读精确模型、引擎执行路径、runtime 写目录 | `crates/mindone-sandbox/src/launch.rs` | launch path/canonicalization/Seatbelt profile 单元测试；Linux/macOS 真实 gate 为 ignored + env-gated，并已在公开 Actions 显式运行通过 | macOS Seatbelt 与 Linux 四层门禁已有 Runner 证据；Windows 当前只承诺 Experimental Job Object |
-| macOS Seatbelt 允许目标操作并拒绝越权写入与 sibling 模型 | `crates/mindone-sandbox/tests/macos_seatbelt.rs` | 当前显式执行 `MINDONE_REAL_SEATBELT_TEST=1 cargo test -p mindone-sandbox --test macos_seatbelt -- --ignored --nocapture` 为 1/1 passed；`.github/workflows/ci.yml::macos-sandbox-gate` 会在干净 runner 重跑 | 当前本机实测通过；Actions 仍待外部验证；macOS 最高为 Standard-Limited |
+| macOS Seatbelt 允许目标操作并拒绝越权写入与 sibling 模型 | `crates/mindone-sandbox/tests/macos_seatbelt.rs` | 当前显式执行 `MINDONE_REAL_SEATBELT_TEST=1 cargo test -p mindone-sandbox --test macos_seatbelt -- --ignored --nocapture` 为 1/1 passed；公开 `.github/workflows/ci.yml::macos-sandbox-gate` 也在干净 runner 通过 | 本机与 Actions 均已实测；macOS 最高为 Standard-Limited |
 | Linux namespaces + no-new-privs + seccomp + Landlock，缺能力 fail closed | `crates/mindone-sandbox/src/launch.rs`、`crates/mindone-sandbox/src/linux_supervisor.rs`、`crates/mindone-sandbox/src/capability.rs`、`crates/mindone-cli/tests/linux_sandbox.rs` | 测试为 `#[ignore]` 且要求 `MINDONE_REAL_LINUX_SANDBOX_TEST=1`；`.github/workflows/ci.yml::linux-sandbox-gate` 安装可信 bubblewrap、只临时调整 runner sysctl，并真实验证允许目标、拒绝 sibling、允许已接受回环 TCP 响应、拒绝主动 `connect` 与 UDP socket | 实现与确定性测试完成；发布只接受精确候选提交的原生 Actions gate |
-| Windows 仅把实际 Job Object 报告为 Experimental，不冒充文件/网络沙箱或 Standard | `crates/mindone-sandbox/src/capability.rs`、`crates/mindone-sandbox/src/launch.rs`、`crates/mindone-sandbox/src/windows_supervisor.rs`、`crates/mindone-cli/src/share.rs`、`crates/mindone-cli/src/doctor.rs` | 启动计划只在监督进程实际创建并持有 `KILL_ON_JOB_CLOSE` Job Object 时把它加入 `applied`；没有监督进程时 `applied` 为空。Windows capability 单测保持 `Experimental`、空 `applicable`，Windows runner 另有真实 supervisor smoke | 当前轮未运行 Windows runner；Job Object 只约束进程生命周期，当前官方路径不宣称文件系统、网络、AppContainer 或 Hyper-V 沙箱，也不能产生 Standard |
+| Windows 仅把实际 Job Object 报告为 Experimental，不冒充文件/网络沙箱或 Standard | `crates/mindone-sandbox/src/capability.rs`、`crates/mindone-sandbox/src/launch.rs`、`crates/mindone-sandbox/src/windows_supervisor.rs`、`crates/mindone-cli/src/share.rs`、`crates/mindone-cli/src/doctor.rs` | 启动计划只在监督进程实际创建并持有 `KILL_ON_JOB_CLOSE` Job Object 时把它加入 `applied`；没有监督进程时 `applied` 为空。Windows capability 单测保持 `Experimental`、空 `applicable`，公开 Windows runner 的真实 supervisor smoke 已通过 | Job Object 生命周期已由 Runner 实测；它只约束进程生命周期，不宣称文件系统、网络、AppContainer 或 Hyper-V 沙箱，也不能产生 Standard |
 | `serve status` 核验引擎与日志 monitor 的 PID/启动标记/命令身份、health、资源/指标 | `crates/mindone-cli/src/serve.rs`、`crates/mindone-engine/src/process.rs` | 单测与最终 E2E 均得到 `running/process_verified/log_monitor_verified/healthy=true` | 完成（本机实测） |
 | 日志轮转持续有界且 fail closed | `crates/mindone-engine/src/logging.rs`、内部 `__worker log-monitor` | 10 MiB/5 代、同 inode copy+truncate、ready 握手、路径替换、symlink/reparse/hardlink、进程身份与运行期 containment 共 9 项定向测试；最终 E2E 验证真实 monitor 生命周期 | 完成（本机实测）；Windows identity/reparse 由 Actions 重跑 |
-| 受管引擎不记录 Prompt/Response，并启用请求后 slot erase 所需的动作端点 | `crates/mindone-engine/src/process.rs`、`crates/mindone-engine/src/logging.rs`、`crates/mindone-cli/src/serve.rs` | 仅允许已审计 llama.cpp `b10064`；启动前受限 `--help` 能力探测并固定 `--parallel 4 --kv-unified` 等安全参数；`process::tests`、fake-engine/canary 与逐槽清理定向测试通过，历史真实 E2E 完成日志扫描/终态清理 | 当前参数的确定性门禁完成；四槽真实小模型 E2E 待复验 |
+| 受管引擎不记录 Prompt/Response，并启用请求后 slot erase 所需的动作端点 | `crates/mindone-engine/src/process.rs`、`crates/mindone-engine/src/logging.rs`、`crates/mindone-cli/src/serve.rs` | 仅允许已审计 llama.cpp `b10064`；启动前受限 `--help` 能力探测并固定 `--parallel 4 --kv-unified` 等安全参数；`process::tests`、fake-engine/canary、逐槽清理定向测试与当前四槽公开 E2E 的日志扫描/终态清理均通过 | 当前参数的确定性门禁和四槽真实小模型 E2E 完成 |
 | `serve stop` 优雅停止后超时终止，防 PID 复用并等待日志 monitor 自退 | `crates/mindone-cli/src/serve.rs`、`crates/mindone-engine/src/process.rs` | 进程句柄/marker 单测；最终 E2E `serve stop` 成功、端口关闭且状态清理 | 完成（本机实测） |
-| standalone `serve` 每请求 KV/主机缓冲只报告真实 best-effort 清理 | `crates/mindone-cli/src/serve_proxy.rs`、`crates/mindone-engine/src/process.rs`、`crates/mindone-cli/src/serve.rs` | llama.cpp 仅监听随机内部回环端口；公开代理强制覆盖任意来访 `id_slot` 为本机 slot 0 并禁用 prompt cache，每个 chat/completions 或 completions 真实响应终态（含上游失败、消费者断开）后同步调用 b10064 `/slots/0?action=erase`，失败状态无正文持久化并阻止下一次推理；贡献 worker 只直连 slot 1..3。代理清理定向测试、贡献双槽并发/独立 erase 与 `owned_buffers_are_actually_zeroized` 通过；历史真实 E2E 早于四槽参数变更 | 当前参数的确定性门禁完成；只承诺可控逻辑 sequence 与 MindOne 自有缓冲 best-effort 覆写，四槽真实小模型 E2E 待复验 |
+| standalone `serve` 每请求 KV/主机缓冲只报告真实 best-effort 清理 | `crates/mindone-cli/src/serve_proxy.rs`、`crates/mindone-engine/src/process.rs`、`crates/mindone-cli/src/serve.rs` | llama.cpp 仅监听随机内部回环端口；公开代理强制覆盖任意来访 `id_slot` 为本机 slot 0 并禁用 prompt cache，每个 chat/completions 或 completions 真实响应终态（含上游失败、消费者断开）后同步调用 b10064 `/slots/0?action=erase`，失败状态无正文持久化并阻止下一次推理；贡献 worker 只直连 slot 1..3。代理清理定向测试、贡献双槽并发/独立 erase、`owned_buffers_are_actually_zeroized` 与当前四槽真实 E2E 均通过 | 只承诺可控逻辑 sequence、受管 slot erase 与 MindOne 自有缓冲 best-effort 覆写，不冒充驱动/物理内存清零 |
 
 ## 6. 网络共享与任务 worker
 
@@ -174,9 +174,9 @@
 |---|---|---|---|
 | `quota balance/history/receipt` 只读权威 API | `crates/mindone-cli/src/quota.rs`、`crates/mindone-coordinator/src/routes/quota.rs` | protocol/accounting 单元测试与 PostgreSQL balance/history/receipt 场景通过 | 完成（本地自动测试） |
 | microquota 全程整数、显示两位小数 | `crates/mindone-accounting/src/fixed.rs`、`crates/mindone-cli/src/quota.rs` | `fixed::tests::matches_all_whitepaper_golden_values`、`quota::tests::formats_microquota_without_float` | 完成（本地自动测试） |
-| `quota use` 只绑定 loopback；OpenAI `GET /v1/models` 与 `POST /v1/chat/completions` | `crates/mindone-cli/src/quota.rs`、`crates/mindone-protocol/src/openai.rs` | `model_proxy_prefers_internal_models_over_openai_data` 锁定协调器同时返回 OpenAI `data` 与内部 `models` 时的解析优先级；其余 OpenAI 自动测试及历史真实 GGUF E2E 覆盖动态 chat 非流式/SSE、游标恢复与唯一结算 | 完成（历史本机实测 Standard）；当前四槽模型链须由精确候选提交复验 |
-| OpenAI 兼容 `POST /v1/completions` | `crates/mindone-cli/src/quota.rs`、`crates/mindone-cli/src/share.rs`、`crates/mindone-protocol/src/openai.rs` | 自动测试覆盖 prompt shape、授权上限、worker endpoint 映射；历史真实 GGUF E2E 完成 completion 非流式/SSE、密文与唯一结算 | 完成（历史本机实测 Standard）；四槽模型链待复验 |
-| `stream:true` 只在 Standard 双端点启用；Regulated 明确拒绝且不降级 | `crates/mindone-cli/src/quota.rs` | 自动测试与历史真实 E2E 均验证 HTTP 400 `unsupported_stream`，不创建任务或 receipt | 自动合同完成；四槽模型链待复验 |
+| `quota use` 只绑定 loopback；OpenAI `GET /v1/models` 与 `POST /v1/chat/completions` | `crates/mindone-cli/src/quota.rs`、`crates/mindone-protocol/src/openai.rs` | `model_proxy_prefers_internal_models_over_openai_data` 锁定协调器同时返回 OpenAI `data` 与内部 `models` 时的解析优先级；当前四槽公开 E2E 覆盖动态 chat 非流式/SSE、游标恢复与唯一结算 | 完成（当前公开 Linux Standard E2E） |
+| OpenAI 兼容 `POST /v1/completions` | `crates/mindone-cli/src/quota.rs`、`crates/mindone-cli/src/share.rs`、`crates/mindone-protocol/src/openai.rs` | 自动测试覆盖 prompt shape、授权上限、worker endpoint 映射；当前四槽公开 E2E 完成 completion 非流式/SSE、密文与唯一结算 | 完成（当前公开 Linux Standard E2E） |
+| `stream:true` 只在 Standard 双端点启用；Regulated 明确拒绝且不降级 | `crates/mindone-cli/src/quota.rs` | 自动测试与当前四槽公开 E2E 均验证 HTTP 400 `unsupported_stream`，不创建任务或 receipt | 完成（当前公开 Linux Standard E2E） |
 | perf/trust/quota/points 定点公式 | `crates/mindone-accounting/src/fixed.rs` | 3 个 fixed golden/边界测试 | 完成（本地自动测试） |
 | 事务结算：消费、节点额度、贡献值、准备金与 complete 同事务；失败不扣 | `crates/mindone-coordinator/src/settlement.rs`、`crates/mindone-coordinator/src/routes/jobs.rs` | fresh v36 `crates/mindone-coordinator/tests/postgres_integration.rs` 11/11 | 完成（本地自动测试） |
 | Standard receipt/哈希链不冒充密码学执行证明 | `crates/mindone-coordinator/src/settlement.rs`、`crates/mindone-accounting/src/ledger.rs` | 实际 Token/结果由节点上报并受授权上限约束；哈希用于事务一致性、幂等和审计 | 边界已明确；不证明真实执行、精确用量或输出正确性 |
@@ -230,14 +230,14 @@
 | 场景 | 真实实现 | 自动化证据 | 状态 |
 |---|---|---|---|
 | A：base 1.00、High/Standard 1.50、quota 1.20、points 1.80、reserve 0.30 | `crates/mindone-accounting/src/fixed.rs`、coordinator settlement/quota receipt | fixed golden 与完整 receipt/账本 PostgreSQL 场景通过 | 完成（本地自动测试） |
-| B：75°C、保留 4GB、拒绝 `nsfw,heavy-math`、三个隔离贡献 slot（最大并发可收紧为 1..3） | accounting policy、CLI node/share、coordinator jobs | 策略/滞回/并发、双槽独立绑定/erase 与并发 refresh 自动测试通过；历史真实 GGUF E2E 覆盖两次策略检查与拒绝零结算 | 自动合同完成；四槽真实小模型与真实 GPU 传感器仍待相应平台验证 |
+| B：75°C、保留 4GB、拒绝 `nsfw,heavy-math`、三个隔离贡献 slot（最大并发可收紧为 1..3） | accounting policy、CLI node/share、coordinator jobs | 策略/滞回/并发、独立绑定/erase 与并发 refresh 自动测试通过；当前四槽公开 GGUF E2E 覆盖两次策略检查与拒绝零结算 | CPU-only 四槽真实小模型完成；真实 GPU 传感器仍待相应平台验证 |
 
 ## 12. 安装、卸载与发布安全
 
 | 合同 | 真实实现 | 自动化证据 | 状态 |
 |---|---|---|---|
 | 开发 Compose smoke 的 Secret、CLI Home、临时材料与清理边界 | `scripts/mvp-dev-smoke.sh`、`scripts/mvp-dev-smoke-contract-test.sh`、`.dockerignore`、`.github/workflows/ci.yml` | Secret 只接受 `MINDONE_DEV_POSTGRES_PASSWORD` / `MINDONE_DEV_STANDARD_DATA_KEY` 专用环境变量；旧 Secret 参数启动 Docker 前拒绝且不回显；CLI 统一绑定临时目录下的隔离 `MINDONE_HOME`；合同测试验证仓库外 `0700` 目录、文件权限、正常/信号退出清理和构建上下文排除，并已接入 CI | 安全合同测试本机通过；不连接 Docker 或网络，本轮未重跑完整开发 Compose/Docker smoke |
-| Unix 安装：HTTPS/有限跳转、SHA-256、archive 白名单、原子暂存、受管用户 PATH | `scripts/install.sh` | 本地 release smoke 验证归档、安装、`--check`、重装、中文 help、doctor JSON、唯一受管块及新 shell 裸 `mindone` | 当前平台 unsigned local smoke 通过；GitHub Actions/多平台待外部运行 |
+| Unix 安装：HTTPS/有限跳转、SHA-256、archive 白名单、原子暂存、受管用户 PATH | `scripts/install.sh` | 本地 release smoke 验证归档、安装、`--check`、重装、中文 help、doctor JSON、唯一受管块及新 shell 裸 `mindone`；公开 v1.0.2 latest 资产又完成 macOS 隔离安装与 PTY 裸 TUI | v1.0.2 已发布；Linux/macOS 原生构建和 Unix 安装门禁均由公开 Actions 覆盖，平台包未做 Apple 原生签名 |
 | Unix 卸载：默认保留数据，显式 purge，父链/目标 symlink、宽路径、孤儿服务状态与非 MindOne 文件 fail closed | `scripts/uninstall.sh` | release smoke 验证默认卸载保留数据、移除受管 PATH 块与 `--purge-data`；负向门禁有定向证据 | 三个 Unix 用户态目标与公开 Linux 安装/卸载门禁通过 |
 | Windows 安装：与 Unix 对齐的合同、checksum、zip 精确清单、原子覆盖更新、拒绝重解析链、用户 PATH | `scripts/install.ps1`、`.cargo/config.toml`、`scripts/verify-windows-self-contained.ps1` | PowerShell 7.5 解析、x86_64 MSVC 交叉 check/严格 Clippy/静态 PE 审计通过；公开 Windows Runner 进一步验证原生编译、`dumpbin`、用户/进程 PATH、裸命令、`-Launch`、`-NoModifyPath`、空项/空格/尾分隔符无损保留、替换与拒绝边界 | 原生安装合同已通过 Actions；交互 TUI、Credential Manager、Job Object 生命周期和模型启动仍待用户真机 |
 | Windows 卸载：默认保留数据，`-PurgeData` 才删除；精确清理安装目录 PATH；拒绝 root/user/reparse/非规范/外部项/缺 CLI 的服务状态 | `scripts/uninstall.ps1` | Windows Actions 已覆盖保留、彻底删除、其他 PATH 项逐字节恢复、服务安全停止与拒绝边界 | 原生 Actions 通过；用户真机仍作最终平台验收 |
@@ -259,6 +259,6 @@
 | RustSec、cargo-deny、Gitleaks 与 workflow/script 静态门禁 | cargo-audit 0.22.2 本轮联网刷新到 1167 条 advisory 后为 0 vulnerability / 0 warning；`cargo deny check`、actionlint、workflow/Shell 语法和本地 Gitleaks 均退出 0；公开 Security workflow 的三项 job 已在候选提交通过 | 正式发行要求标签所指精确提交再次全绿 |
 | 正式代码签名/notarization | Apple/Windows 官方工具的签名与验证输出；未取得证据时发行页与包内必须明确标为未签名/notarization 未完成，不能把稳定版本通道冒充为已签名 | 待外部验证；当前 workflow 会按实际 Secret 结果披露，不伪造签名 |
 | 真实 SEV-SNP/TDX 证明与 Regulated E2E | 目标 guest 的真实 quote/report、厂商 collateral、固定 verifier、measurement allowlist、TEE adapter、密文推理与结果解密 | 待外部验证；软件测试通过不能替代 |
-| 分支推送、PR 与 GitHub Actions | PR URL、所有 required checks 绿色；不自动合并 | 待外部验证 |
+| 分支推送与 GitHub Actions | 代码/工作流精确提交、CI/Security URL 与绿色终态；本轮经用户授权直接推送，不虚构不存在的 PR | 发布仓库上下文修复基线 `f4adc51` 已推送；CI `29988119866` 与 Security `29988121928` 全绿 |
 
 当前源码的 40 个公开叶子参数矩阵和 TUI 10 类映射已落盘并通过完整 CLI 与 workspace 门禁；HF 日常小模型部署探测只读取 64 KiB 后断开。按端口并行运行多个本地受管实例已实现并通过状态隔离/在用保护的确定性测试，没有下载第二个真实模型。当前 workspace `590/0/5`、fresh-v39 `49/49`、Unix/Windows 安装门禁、macOS Seatbelt、Linux 四层沙盒、五目标原生编译、当前四槽 CPU-only 小模型业务链、API Key 网关 JSON/SSE 数据库 E2E 和 v1.0.2 五平台发行均已有真实证据；Windows 真机交互/模型启动、公网 API 子域 TLS、外部 SMTP、Apple/Windows 平台原生签名、private 双 GGUF、真实 TEE 与 production live 切换仍未完成。

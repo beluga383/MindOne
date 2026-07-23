@@ -52,7 +52,7 @@ cargo install --locked --path crates/mindone-cli --root "$env:LOCALAPPDATA\MindO
 
 `git clone` 本身不可能安全地修改父终端的 PATH，也不会自动执行仓库脚本；因此“clone 后不做任何安装就直接输入 mindone”不是 Git 能提供的合同。上面的单行源码安装，或发行包安装器加当前会话 PATH，才是可复现边界。安装完成后裸 `mindone` 会直接进入 TUI。
 
-2026-07-22 已在仓库外隔离安装根真实执行上述 `cargo install`：最小 PATH 下 `mindone --version` 成功，非交互裸 `mindone` 显示中文帮助并退出 0，真实 PTY 中裸 `mindone` 进入新版工作台并由 `q` 正常退出。该 smoke 只证明当前 macOS arm64 的源码安装路径；Windows/Linux 仍以对应原生 Actions runner 为最终证据，远程安装器则必须等 GitHub 仓库与 Release 实际发布后再验收。
+2026-07-22 已在仓库外隔离安装根真实执行上述 `cargo install`：最小 PATH 下 `mindone --version` 成功，非交互裸 `mindone` 显示中文帮助并退出 0，真实 PTY 中裸 `mindone` 进入新版工作台并由 `q` 正常退出。v1.0.2 发布后又从公开 latest 资产安装 `aarch64-apple-darwin` 到隔离目录，版本、中文帮助和真实 80×24 PTY 裸 `mindone` 渲染/退出均为 0。Windows/Linux 的原生构建和安装卸载由对应 Actions runner 验证；Windows 交互 TUI、Credential Manager、Job Object 生命周期和真实模型启动仍由用户真机验收。
 
 本地已构建二进制装入 PATH（例如把当前工作树的 release 二进制放进已在 PATH 的 `~/.cargo/bin`）：
 
@@ -83,7 +83,7 @@ mindone model probe Qwen/Qwen3-0.6B --deployment
 mindone model deploy auto
 ```
 
-Windows x86_64、macOS 和 Linux 使用同一 `mindone model deploy` 命令；平台差异由受管引擎安装器处理。目录解析支持单文件或完整规范分片 GGUF，正式下载逐片校验并原子登记；`--metadata-only` 可先只验证 HF 清单，普通 probe 仍最多读取 64 KiB。当前本机只对小模型做了 64 KiB 有界下载探测。ARM64 Linux 的既有原生 CLI/strict Clippy/release/安装闭环仍有效；当前修正版又在无网络、源码只读的 Rust 1.88 arm64 容器中通过 workspace check、CLI/TUI 测试、release 版本/裸入口和真实 PTY 启停。Linux x86_64 release 也已在 amd64 Debian 用户态执行版本、中文帮助、推荐、API 信息并完成安装/重装/卸载/purge。Windows x86_64 MSVC 已完成全 workspace check、严格 Clippy 与实际 PE release 交叉构建；Windows target 固定静态链接 CRT，避免干净系统额外安装 VC++ Runtime，且原生 CI 会用 `dumpbin` 拒绝回退。Linux 真实四层沙盒与两个架构的模型下载安装、以及 Windows 真机安装/运行流程仍须对应 runner 验证，不能从交叉编译结果外推。完整目录与格式/内存拒绝边界见 [模型文档](MODELS.md)。
+Windows x86_64、macOS 和 Linux 使用同一 `mindone model deploy` 命令；平台差异由受管引擎安装器处理。目录解析支持单文件或完整规范分片 GGUF，正式下载逐片校验并原子登记；`--metadata-only` 可先只验证 HF 清单，普通 probe 仍最多读取 64 KiB。日常本机审计只对 Qwen3-0.6B 做 64 KiB 有界下载探测；公开 Linux E2E 则对同一小模型完成整包下载、验证、llama.cpp 安装/健康启动、真实推理和清理，没有下载第二个模型。ARM64 Linux 的既有原生 CLI/strict Clippy/release/安装闭环仍有效；当前修正版又在无网络、源码只读的 Rust 1.88 arm64 容器中通过 workspace check、CLI/TUI 测试、release 版本/裸入口和真实 PTY 启停。Linux x86_64 release 也已在 amd64 Debian 用户态执行版本、中文帮助、推荐、API 信息并完成安装/重装/卸载/purge。Windows x86_64 MSVC 已完成全 workspace check、严格 Clippy、实际 PE release 交叉构建，并由原生 Windows Runner 通过编译、静态 CRT `dumpbin`、安装、裸命令、更新和安全卸载门禁。Windows 交互 TUI、Credential Manager、Job Object 生命周期和真实模型启动仍须用户真机验证，不能从编译/安装门禁外推。完整目录与格式/内存拒绝边界见 [模型文档](MODELS.md)。
 
 选中动作后可在编辑区补齐完整参数，所以登录、模型、引擎、服务、共享、额度、节点、配置与诊断能力都不必退出 TUI。单引号、双引号和反斜杠只用于安全分词，输入不经过 shell，变量、管道、重定向和命令替换不会被展开或执行；隐藏的内部 `__worker` 会被拒绝。认证、写入及启动/停止等生命周期动作执行前需要二次确认。执行期间界面会暂离备用屏幕和 raw 模式，由普通终端承载命令交互与输出，结束后自动恢复，并保留该命令的原始 `exit_code`。带子命令直接调用（如 `mindone doctor`）仍按普通 CLI 处理；非交互环境下裸 `mindone` 显示帮助，`mindone ui` 返回“需要交互式终端”错误。
 
@@ -334,7 +334,7 @@ keyctl session -- sh -c '
 
 2026-07-22 当前 macOS arm64 工作树已用上述隔离配置通过：真实非流式 chat/completions、两个端点的 SSE 动态增量、连续游标及数据库故障恢复、Standard AEAD/HMAC 静态存储、公开 canary 收口、领取后策略复核失败且零结算、三轨唯一结算、Regulated `stream:true` 拒绝、Prompt/Response 日志扫描和清理均得到验证。该运行使用 debug 二进制、`local-development` 和 CPU-only Seatbelt；它不证明 release/签名产物、email SMTP/浏览器、公网 TLS、production 升级、GPU/其他平台、真实 private catalog 多实例仲裁或 SNP/TDX Regulated 硬件可用。
 
-2026-07-23 当前四槽版本另用 `18082` 完成 Qwen3-0.6B-Q4_0 整包下载、SHA-256/结构验证、b10064 启动和 `/health`；随后旧脚本因 `serve status` 漏传端口而在默认 `8080` 误报未运行。脚本现已把 status、publish、stop 和清理全部绑定 `MINDONE_E2E_LLAMA_PORT`，`share publish` 也会持久化并复验所选端口；这轮尚未完成后续真实 Standard job，所以仍以新的外部 CI 为最终证据。
+2026-07-23 当前四槽版本另用 `18082` 完成 Qwen3-0.6B-Q4_0 整包下载、SHA-256/结构验证、b10064 启动和 `/health`；随后旧脚本因 `serve status` 漏传端口而在默认 `8080` 误报未运行。脚本已把 status、publish、stop、日志审计和清理全部绑定 `MINDONE_E2E_LLAMA_PORT`，`share publish` 也会持久化并复验所选端口；修复后的公开 Linux E2E 已继续完成双账号 Standard job、chat/completions、两类 SSE、结算、策略拒绝零结算及最终清理。
 
 ## 10. 数据目录
 
