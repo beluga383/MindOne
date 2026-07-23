@@ -17,13 +17,13 @@
 ## 2. 已确认现实边界
 
 - 当前工作分支为 `codex/complete-cli-mvp-v1`；源码已推进到连续 39 个 migration（`0001..0039`）。0038 固化 fast/standard/slow 任务档位，0039 增加 inference-only API Key 与只追加事件。
-- fresh-v37 `43/43` 与 workspace `556/0/5` 是 0038/0039、模型目录和公网网关之前的历史证据。当前树已通过 workspace `590/0/5`，并在一次性 PostgreSQL 17 上让 16 个 binary 各用独立数据库完成 fresh-v39 `49/49`、无 skip；公网 E2E 仍未回填。
+- fresh-v37 `43/43` 与 workspace `556/0/5` 是 0038/0039、模型目录和公网网关之前的历史证据。当前树已通过 workspace `590/0/5`，并在一次性 PostgreSQL 17 上让 16 个 binary 各用独立数据库完成 fresh-v39 `49/49`、无 skip；live v39 的 Cloudflare identity/CF-Ray、匿名 401 与端口隔离也已回填。
 - 当前 debug 工作树的隔离 CPU-only E2E 已使用 fresh PostgreSQL v37、两个账号/device、真实 llama.cpp `b10064` 与 `Qwen3-0.6B-Q4_0.gguf` 从头退出 0；当前平台安装发行 smoke 也已通过。上述结果仍不等于正式发布门禁，多平台构建、外部 Actions、签名、SMTP、真实 TEE、private 双 GGUF 和 production 均另列待验证。
-- 本机 live production 是受保护的 v26 实例，不是 v39 验收环境；在完成维护窗口、无活动租约检查、旧节点 device rebind、独立 HMAC key/完整预算和回滚方案前不得升级或扰动。
+- 本机 live production 已在无活动任务/prepared route、二次备份和隔离恢复演练基础上受控升级为 v39；后续仍不得绕过 owner migrator、runtime role-init、旧节点 device rebind、独立 HMAC key/完整预算和回滚门禁。
 - private `global_reserve_entries` 的跨 catalog 核心算法已实现：availability 前持有全局 advisory transaction lock，并按受控 catalog 目录全部 entry 的 legacy/v2 唯一冲突键并集计算 remaining。不同 catalog 真重叠、两个独立 `PgPool` 的回归已进入 fresh-v37 `43/43` 强制 PostgreSQL gate。
-- GitHub 仓库、`main`、raw 安装器、旧 `v1.0.0`/`v1.0.1` 标签和 v1.0.2 latest Release 已公开；旧标签不会强制移动。v1.0.2 精确提交已通过 Security、完整 CI、发行前 workspace/PostgreSQL/安全复验、五平台打包、SPDX SBOM、Sigstore checksum bundle 与 GitHub provenance。最终 publish job 因非 Git 目录缺少仓库上下文失败后，已用同一聚合 artifact 显式指定仓库创建 Release，并在后续 main 为 workflow 固化 `GH_REPO`。Apple Developer ID/notarization、Windows Authenticode、Cloudflare 公网路由和 production v26→v39 切换均没有完成证据。
+- GitHub 仓库、`main`、raw 安装器、旧 `v1.0.0`/`v1.0.1` 标签和 v1.0.2 latest Release 已公开；旧标签不会强制移动。v1.0.2 精确提交已通过 Security、完整 CI、发行前 workspace/PostgreSQL/安全复验、五平台打包、SPDX SBOM、Sigstore checksum bundle 与 GitHub provenance。最终 publish job 因非 Git 目录缺少仓库上下文失败后，已用同一聚合 artifact 显式指定仓库创建 Release，并在后续 main 为 workflow 固化 `GH_REPO`。Cloudflare 公网路由和 production v26→v39 切换现已有 live 证据；Apple Developer ID/notarization 与 Windows Authenticode 仍未配置。
 - 本机为 Apple Silicon macOS，只能报告真实的 `Standard-Limited`，不能伪造 Enhanced TEE。
-- GitHub OAuth App、Cloudflare 路由保存、账号验证码和系统权限属于需要用户确认的外部步骤。
+- GitHub OAuth App、Cloudflare 路由保存、账号验证码和系统权限属于需要用户授权的外部步骤；本轮 GitHub/Cloudflare 操作已经授权并完成，不自动授权未来变更。
 - `C_base` 已选择稳定合同 `server_reference_upper_bound_v1`：协调器按授权输入/输出上界和 operator 发布的不可变参考 profile，对 token、参考 GPU 时间、参考显存积分三个分项分别向上取整后求和。仓库不内置生产费率；具体 profile 数值仍必须由产品/运维通过审计 provisioning 决定，节点自报实际用量不进入金额。
 
 这些边界不会被伪造为成功，也不会被用来省略应由代码完成的核心功能。
@@ -83,7 +83,7 @@
 
 验收：迁移可重复运行；认证、心跳、发布、双重领取保护、结算、失败不扣、准备金及撤销集成测试通过。
 
-当前证据：fresh v39 的 16 个 coordinator integration binary 已在一次性 PostgreSQL 17 上各用独立数据库通过，合计 `49/49`、无 skip，持久库 metadata `39|1|39|t`；速度档调度、API Key/OpenAI JSON 与真实密文 SSE 网关事务 E2E 包含其中。production 仍为 v26。
+当前证据：fresh v39 的 16 个 coordinator integration binary 已在一次性 PostgreSQL 17 上各用独立数据库通过，合计 `49/49`、无 skip，持久库 metadata `39|1|39|t`；速度档调度、API Key/OpenAI JSON 与真实密文 SSE 网关事务 E2E 包含其中。production 也已迁移到 v39，并完成最小 ACL 与 ready 验收。
 
 ### 阶段 D：CLI 与本地执行面
 
@@ -111,10 +111,10 @@
 
 - 用隔离 `MINDONE_HOME` 模拟消费者与贡献节点/模型实例。当前 debug 工作树的 `scripts/e2e-test.sh` 已以 fresh PostgreSQL v37、真实 llama.cpp b10064 与 Qwen3-0.6B-Q4_0 GGUF 完成双账号/device、确定性 public canary 终态、消费/节点贡献/网络准备金三轨账本核对并退出 0。
 - 当前真实模型代理验收已记录 `GET /v1/models`、`POST /v1/chat/completions` 与兼容 `POST /v1/completions`，覆盖非流式、双端点 SSE、游标故障恢复、AEAD 密文、独立唯一结算、策略二检零结算、Regulated 流式拒绝、日志扫描和资源清理；多模型/private 双 GGUF 路由仍待扩展。
-- 使用独立 key、完整预算与真实签名 catalog 验证 private v2 的普通 wire、零财务、raw identifier/bare SHA 为 `NULL`、终态 capability 和跨 catalog reserve；不得在 production v26 上试验。**仍待外部验证。**
-- 经用户确认后配置 Cloudflare，只公开 8787 协调服务。**仍待外部验证。**
+- 使用独立 key、完整预算与真实签名 catalog 验证 private v2 的普通 wire、零财务、raw identifier/bare SHA 为 `NULL`、终态 capability 和跨 catalog reserve；不得在未配置这些门禁的 production 上试验。**仍待外部验证。**
+- 专用 Cloudflare connector 已接通，只公开协调器 HTTPS 子域；origin、PostgreSQL、llama-server 和本地代理均无宿主机或公网端口。
 
-验收：Standard 单模型双端点真实推理、账本、两次策略检查、slot erase、日志扫描与本轮资源清理已有当前 debug 命令输出。它不代表 GitHub Actions、签名发布、外部 SMTP、真实 TEE、private 双 GGUF、production HTTPS 或公网端口已验证。
+验收：Standard 单模型双端点真实推理、账本、两次策略检查、slot erase、日志扫描与本轮资源清理已有当前 debug 命令输出；production HTTPS、Cloudflare 身份与端口隔离也已验证。它仍不代表平台原生签名、外部 SMTP、真实 TEE 或 private 双 GGUF 已验证。
 
 ### 阶段 G：发布协作
 
@@ -137,7 +137,7 @@
 2. 当前 debug 隔离真实 GGUF E2E、日志泄露扫描、结算与清理闭环已通过，覆盖 chat、`/v1/completions` 与两端点 Standard SSE；后续修改引擎、worker、代理、SSE 或结算路径时重跑。
 3. 当前 `mindone 1.0.2` / `aarch64-apple-darwin` 二进制的归档 SHA-256、安装、`--check`、重装、中文帮助/版本、doctor、默认保留与 purge 卸载已通过；发行相关源码再改动时必须重跑。
 4. 完成 ModelScope 真实公网 artifact smoke、外部 SMTP/浏览器/CLI 签名 poll 和 private 双 GGUF harness，或继续明确标为未验证。
-5. 用户授权后再执行 GitHub/Actions、Cloudflare、公网端口审计和 production v26→v39 受控升级；正式 SNP/TDX、GPU 与签名仍各自需要真实外部证据。
+5. GitHub/Actions、Cloudflare、公网端口审计和 production v26→v39 受控升级已执行；正式 SNP/TDX、Windows 真机交互/模型启动与平台原生签名仍各自需要真实外部证据。
 
 ## 8. 提交策略
 

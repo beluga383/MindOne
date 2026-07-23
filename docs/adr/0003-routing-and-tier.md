@@ -42,7 +42,7 @@ v1 参数与状态定义：
 
 private 正确/错误结果、主动 `/fail` 与沉默超时都会原子追加跨实例真实性仲裁。仲裁按模型权重、evaluator key fingerprint 和 case family 隔离，只以不同 `model_instance_id` 的最新观察形成 `pending`、`corroborated` 或 `disputed` 快照；事件拒绝 UPDATE/DELETE。public/private 信号还共同驱动 exact-instance 的隔离与恢复状态，但在线分数和仲裁 verdict 都不更新 canonical benchmark、Glicko 或 Tier，也不产生消费者扣费、贡献值、准备金变动或 receipt。
 
-这一隐蔽性只覆盖执行前与提交 wire 没有专用标签，不承诺 Prompt 语义、领取时序、流量分布或完成后不可分类。真实零结算可以暴露类别；实现不得通过伪造消费者、余额、贡献值或账本来隐藏这个事实。部署期签名 catalog、行为指纹和跨实例仲裁是软件风险证据，不会把不可信 Standard worker 变成可信硬件；`corroborated` 不是 TEE、硬件签名或可验证计算证明。仓库提供实现与显式 Compose overlay，也不等于 live production 已启用：2026-07-18 已验证的 production 仍在 migration 26 且没有挂载 catalog，必须迁移到 28、挂载真实签名 catalog 并完成 PostgreSQL/真实模型验收后再改变部署声明。
+这一隐蔽性只覆盖执行前与提交 wire 没有专用标签，不承诺 Prompt 语义、领取时序、流量分布或完成后不可分类。真实零结算可以暴露类别；实现不得通过伪造消费者、余额、贡献值或账本来隐藏这个事实。部署期签名 catalog、行为指纹和跨实例仲裁是软件风险证据，不会把不可信 Standard worker 变成可信硬件；`corroborated` 不是 TEE、硬件签名或可验证计算证明。仓库提供实现与显式 Compose overlay，也不等于 live production 已启用：2026-07-18 的 production v26 且未挂载 catalog 是历史状态；2026-07-23 schema 已迁移到 v39，但仍须挂载真实签名 catalog、独立 key/完整预算并完成 PostgreSQL/真实模型验收后，才能改变 private 部署声明。
 
 ## Phase 1：模型选择
 
