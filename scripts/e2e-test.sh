@@ -984,9 +984,31 @@ MINDONE_HOME="$CONSUMER_HOME" "$CLI" quota use --model auto --port "$PROXY_PORT"
     >"$LOG_DIR/quota-proxy.log" 2>&1 &
 PROXY_PID=$!
 wait_tcp 127.0.0.1 "$PROXY_PORT" 30 || die "额度代理未监听"
-curl --fail --silent --show-error --connect-timeout 5 --max-time 30 \
-    "http://127.0.0.1:${PROXY_PORT}/v1/models" \
-    >"$TEMP_ROOT/proxy-models.json"
+models_http_status=000
+models_attempt=0
+while [ "$models_attempt" -lt 20 ]; do
+    if ! models_http_status=$(curl --silent --show-error --connect-timeout 5 --max-time 30 \
+        --output "$TEMP_ROOT/proxy-models.json" --write-out '%{http_code}' \
+        "http://127.0.0.1:${PROXY_PORT}/v1/models"); then
+        models_http_status=000
+    fi
+    [ "$models_http_status" = "200" ] && break
+    case "$models_http_status" in
+        000|502|503) ;;
+        *) break ;;
+    esac
+    models_attempt=$((models_attempt + 1))
+    sleep 1
+done
+if [ "$models_http_status" != "200" ]; then
+    printf '模型列表预检返回 HTTP %s，响应体：\n' "$models_http_status" >&2
+    cat "$TEMP_ROOT/proxy-models.json" >&2 2>/dev/null || true
+    printf '\n=== 额度代理与协调器有界诊断 ===\n' >&2
+    tail -100 "$LOG_DIR/quota-proxy.log" >&2 2>/dev/null || true
+    tail -100 "$LOG_DIR/coordinator.log" >&2 2>/dev/null || true
+    printf '=== 诊断结束 ===\n' >&2
+    die "OpenAI 模型列表预检未返回 200"
+fi
 python3 - "$TEMP_ROOT/proxy-models.json" <<'PY'
 import json
 import sys

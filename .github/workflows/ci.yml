@@ -1595,6 +1595,7 @@ jobs:
             $mismatchedState = Join-Path $dataDir "runtime\share.json"
             New-Item -ItemType Directory -Path (Split-Path $mismatchedState) -Force | Out-Null
             Set-Content -LiteralPath $mismatchedState -Encoding ascii -Value "{}"
+            New-Item -ItemType Directory -Path (Split-Path $binary) -Force | Out-Null
             Set-Content -LiteralPath $binary -Encoding ascii -Value "not a MindOne executable"
             $mismatchedBefore = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash
             Assert-ScriptFails { & ./scripts/uninstall.ps1 -Yes -PurgeData } "服务状态与伪造 CLI 不一致保护"

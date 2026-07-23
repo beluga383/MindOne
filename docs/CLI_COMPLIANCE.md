@@ -18,8 +18,8 @@
 
 | 已实际运行的命令/检查 | 结果 | 未覆盖内容 |
 |---|---|---|
-| 当前 workspace fmt/check/strict Clippy/tests | macOS 主机全 workspace all-target/all-feature check 和 `-D warnings` 退出 0；全 workspace 31 个 result set 为 `589 passed / 0 failed / 5 ignored`。Windows x86_64 MSVC 交叉环境也已完成全 workspace/all-target/all-feature check 与严格 Clippy | macOS 为本机；Windows 为交叉编译且仍待原生 Actions；ignored 保留外部资源/平台门禁 |
-| 当前 CLI/TUI 完整门禁 | CLI lib `175 passed / 0 failed / 1 ignored`；40 叶子/10 分类精确对等、多端口与平台资产映射均通过 | 回环/真实 macOS capability 测试须在未受额外沙箱限制的本机运行；已退出 worker 的回收测试先确定性等待并回收子进程，再验证启动失败合同，不再依赖 2 秒调度窗口 |
+| 当前 workspace fmt/check/strict Clippy/tests | macOS 主机全 workspace all-target/all-feature check 和 `-D warnings` 退出 0；全 workspace 31 个 result set 为 `590 passed / 0 failed / 5 ignored`。Windows x86_64 MSVC 交叉环境也已完成全 workspace/all-target/all-feature check 与严格 Clippy | macOS 为本机；Windows 为交叉编译且仍待原生 Actions；ignored 保留外部资源/平台门禁 |
+| 当前 CLI/TUI 完整门禁 | CLI lib `176 passed / 0 failed / 1 ignored`；40 叶子/10 分类精确对等、多端口与平台资产映射均通过 | 回环/真实 macOS capability 测试须在未受额外沙箱限制的本机运行；已退出 worker 的回收测试先确定性等待并回收子进程，再验证启动失败合同，不再依赖 2 秒调度窗口 |
 | 历史 workspace fmt/check/strict Clippy/tests | 29 个 result set 合计 `556 passed / 0 failed / 5 ignored`，退出 0 | 早于 0038/0039、模型目录与公网网关，仅作基线 |
 | 历史 fresh PostgreSQL `mindone_gate_0036_full_20260719b` 上的 13 个 coordinator integration binary | 合计 `41/41`、无 skip；sqlx metadata `36|1|36|t` | 只证明历史 v36；证据库必须保留，不得复用或清理 |
 | 当前 migration / fresh v39 数据库 | migration 文件连续 `0001..0039`；一次性 PostgreSQL 17 上 16 个 binary 各用独立数据库，合计 `49/49`、无 skip；持久库 metadata `39|1|39|t` | 独立数据库避免 `database_role` 的故意错误 HMAC commitment 污染其他 binary；不替代 production 升级 |
@@ -174,7 +174,7 @@
 |---|---|---|---|
 | `quota balance/history/receipt` 只读权威 API | `crates/mindone-cli/src/quota.rs`、`crates/mindone-coordinator/src/routes/quota.rs` | protocol/accounting 单元测试与 PostgreSQL balance/history/receipt 场景通过 | 完成（本地自动测试） |
 | microquota 全程整数、显示两位小数 | `crates/mindone-accounting/src/fixed.rs`、`crates/mindone-cli/src/quota.rs` | `fixed::tests::matches_all_whitepaper_golden_values`、`quota::tests::formats_microquota_without_float` | 完成（本地自动测试） |
-| `quota use` 只绑定 loopback；OpenAI `GET /v1/models` 与 `POST /v1/chat/completions` | `crates/mindone-cli/src/quota.rs`、`crates/mindone-protocol/src/openai.rs` | OpenAI 自动测试；历史真实 GGUF E2E 完成动态 chat 非流式/SSE、游标恢复与唯一结算 | 完成（历史本机实测 Standard）；四槽模型链待复验 |
+| `quota use` 只绑定 loopback；OpenAI `GET /v1/models` 与 `POST /v1/chat/completions` | `crates/mindone-cli/src/quota.rs`、`crates/mindone-protocol/src/openai.rs` | `model_proxy_prefers_internal_models_over_openai_data` 锁定协调器同时返回 OpenAI `data` 与内部 `models` 时的解析优先级；其余 OpenAI 自动测试及历史真实 GGUF E2E 覆盖动态 chat 非流式/SSE、游标恢复与唯一结算 | 完成（历史本机实测 Standard）；当前四槽模型链须由精确候选提交复验 |
 | OpenAI 兼容 `POST /v1/completions` | `crates/mindone-cli/src/quota.rs`、`crates/mindone-cli/src/share.rs`、`crates/mindone-protocol/src/openai.rs` | 自动测试覆盖 prompt shape、授权上限、worker endpoint 映射；历史真实 GGUF E2E 完成 completion 非流式/SSE、密文与唯一结算 | 完成（历史本机实测 Standard）；四槽模型链待复验 |
 | `stream:true` 只在 Standard 双端点启用；Regulated 明确拒绝且不降级 | `crates/mindone-cli/src/quota.rs` | 自动测试与历史真实 E2E 均验证 HTTP 400 `unsupported_stream`，不创建任务或 receipt | 自动合同完成；四槽模型链待复验 |
 | perf/trust/quota/points 定点公式 | `crates/mindone-accounting/src/fixed.rs` | 3 个 fixed golden/边界测试 | 完成（本地自动测试） |
@@ -248,7 +248,7 @@
 
 | 验收 | 必须取得的证据 | 当前状态 |
 |---|---|---|
-| 最终 fmt、strict clippy、workspace tests | 当前 31 个 result set 为 `589 passed / 0 failed / 5 ignored`，退出 0；macOS 本机与 Windows x86_64 MSVC 交叉环境的全 workspace check/strict Clippy 均通过 | 5 ignored 是外部/平台门禁，不冒充通过；Windows 原生、Linux/macOS Actions 仍待外部验证 |
+| 最终 fmt、strict clippy、workspace tests | 当前 31 个 result set 为 `590 passed / 0 failed / 5 ignored`，退出 0；macOS 本机与 Windows x86_64 MSVC 交叉环境的全 workspace check/strict Clippy 均通过 | 5 ignored 是外部/平台门禁，不冒充通过；Windows 原生、Linux/macOS Actions 仍待外部验证 |
 | Rust 1.88 MSRV | 当前 all-target/all-feature check 已通过 | Linux/Windows/macOS Actions 仍待外部验证 |
 | PostgreSQL migrations、最小权限角色与完整 API 集成 | 当前源码连续 `0001..0039`；fresh-v39 16 个 binary 各用独立数据库，合计 `49/49`、无 skip，覆盖最小 ACL、速度档调度与 API Key/OpenAI JSON + Standard SSE 网关 E2E | live production 仍为 `26|1|26|t`，严禁把测试结果冒充 production 切换 |
 | 两个隔离 Home 的真实 llama.cpp + GGUF E2E | 四槽改动前的 debug 树以官方 llama.cpp b10064 和 Qwen3-0.6B-Q4_0 GGUF 完成 PostgreSQL v37、双账号/device、public canary、非流式双端点、两类 SSE、游标恢复、密文、三轨唯一结算、策略拒绝零结算、Regulated 流式拒绝、slot erase、日志扫描与清理 | 历史本机单 Standard GGUF 已通过；当前四槽/统一 KV argv、private 双 GGUF、真实 TEE、外部 SMTP、Actions、签名发布和 production 不在该证据内 |
@@ -261,4 +261,4 @@
 | 真实 SEV-SNP/TDX 证明与 Regulated E2E | 目标 guest 的真实 quote/report、厂商 collateral、固定 verifier、measurement allowlist、TEE adapter、密文推理与结果解密 | 待外部验证；软件测试通过不能替代 |
 | 分支推送、PR 与 GitHub Actions | PR URL、所有 required checks 绿色；不自动合并 | 待外部验证 |
 
-当前源码的 40 个公开叶子参数矩阵和 TUI 10 类映射已落盘并通过完整 CLI 与 workspace 门禁；HF 小模型部署目标的真实探测只读取 64 KiB 后断开。按端口并行运行多个本地受管实例已实现并通过状态隔离/在用保护的确定性测试，但没有为了测试再下载并启动第二个真实模型。当前 workspace `589/0/5`、fresh-v39 `49/49`、三个 Unix 用户态 release smoke、macOS Seatbelt、当前 Linux arm64 无网络 check/CLI tests/release PTY、隔离源码安装/裸命令 PTY smoke、Windows x86_64 MSVC check/strict Clippy/静态 release PE 审计与 API Key 网关 JSON/SSE 真实数据库 E2E 已通过；Windows 真机、Linux 四层真实沙盒/模型下载、公网 API 子域 TLS、外部 SMTP、签名发布、private 双 GGUF、真实 TEE 与 production live 切换仍未完成。
+当前源码的 40 个公开叶子参数矩阵和 TUI 10 类映射已落盘并通过完整 CLI 与 workspace 门禁；HF 小模型部署目标的真实探测只读取 64 KiB 后断开。按端口并行运行多个本地受管实例已实现并通过状态隔离/在用保护的确定性测试，但没有为了测试再下载并启动第二个真实模型。当前 workspace `590/0/5`、fresh-v39 `49/49`、三个 Unix 用户态 release smoke、macOS Seatbelt、当前 Linux arm64 无网络 check/CLI tests/release PTY、隔离源码安装/裸命令 PTY smoke、Windows x86_64 MSVC check/strict Clippy/静态 release PE 审计与 API Key 网关 JSON/SSE 真实数据库 E2E 已通过；Windows 真机、Linux 四层真实沙盒/模型下载、公网 API 子域 TLS、外部 SMTP、签名发布、private 双 GGUF、真实 TEE 与 production live 切换仍未完成。

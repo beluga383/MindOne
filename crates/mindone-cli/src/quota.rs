@@ -498,7 +498,7 @@ pub async fn use_proxy(
 
 async fn proxy_models(State(state): State<ProxyState>) -> Response {
     match authorized_get(&state, mindone_protocol::MODELS).await {
-        Ok(value) => match decode_api_value::<ModelListResponse>(value, "读取模型列表") {
+        Ok(value) => match decode_model_list_response(value) {
             Ok(response) => {
                 let mut models = BTreeMap::new();
                 for model in response.models {
@@ -1098,6 +1098,19 @@ fn decode_api_value<T: for<'de> Deserialize<'de>>(value: Value, operation: &str)
         .map_err(|error| CliError::General(format!("协调服务器{operation}响应不兼容：{error}")))
 }
 
+fn decode_model_list_response(value: Value) -> CliResult<ModelListResponse> {
+    // `/v1/models` 同时提供 OpenAI `data` 数组和内部 `models` 数组。通用
+    // `api_payload` 会优先取 `data`，因此这里必须在完整协议字段存在时解析
+    // 顶层对象；仍保留旧式 `{ "data": { "models": [...] } }` 兼容。
+    let payload = if value.get("models").is_some() {
+        value
+    } else {
+        api_payload(value)
+    };
+    serde_json::from_value(payload)
+        .map_err(|error| CliError::General(format!("协调服务器读取模型列表响应不兼容：{error}")))
+}
+
 fn history_path(query: &QuotaHistoryQuery) -> String {
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     if let Some(limit) = query.limit {
@@ -1178,8 +1191,8 @@ mod tests {
     use time::macros::datetime;
 
     use super::{
-        apply_output_token_default, failed_job_error, format_micro, openai_error,
-        signed_performance_delta, validate_inference_request, verify_history_entry,
+        apply_output_token_default, decode_model_list_response, failed_job_error, format_micro,
+        openai_error, signed_performance_delta, validate_inference_request, verify_history_entry,
         LocalLedgerVerification, JOB_POLL_INTERVAL,
     };
     use crate::error::CliError;
@@ -1269,6 +1282,27 @@ mod tests {
             .expect("错误响应应可序列化");
         assert_eq!(value["error"]["type"], "unsupported_stream");
         assert_eq!(value["error"]["code"], "unsupported_stream");
+    }
+
+    #[test]
+    fn model_proxy_prefers_internal_models_over_openai_data() {
+        let mixed = json!({
+            "object": "list",
+            "data": [{
+                "id": "qwen3-e2e",
+                "object": "model",
+                "created": 0,
+                "owned_by": "mindone"
+            }],
+            "models": []
+        });
+        let decoded =
+            decode_model_list_response(mixed).expect("混合模型响应应解析内部 models 字段");
+        assert!(decoded.models.is_empty());
+
+        let legacy = decode_model_list_response(json!({"data": {"models": []}}))
+            .expect("旧式 data envelope 仍应兼容");
+        assert!(legacy.models.is_empty());
     }
 
     #[test]
