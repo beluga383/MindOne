@@ -54,7 +54,7 @@ impl KeyringBackend {
         #[cfg(target_os = "linux")]
         {
             let value = std::env::var_os("MINDONE_LINUX_CREDENTIAL_STORE");
-            return Self::from_linux_value(value.as_deref());
+            Self::from_linux_value(value.as_deref())
         }
         #[cfg(not(target_os = "linux"))]
         {

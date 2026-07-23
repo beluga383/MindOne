@@ -3,11 +3,11 @@
 MindOne 是一个开源、纯公益的 AI 算力与模型共享网络。它使用中心化协调控制面和分布式本地执行面：消费者通过本地 OpenAI 兼容代理提交任务，贡献节点主动连接协调服务器并使用本机受管引擎推理，系统以整数 microquota、贡献值和网络准备金进行可审计结算。
 
 > [!IMPORTANT]
-> 当前工作树已推进到连续 schema `0001..0039`，并因公开的 `v1.0.0` 首次发行门禁失败而进入 `v1.0.1` 补丁发行收口，**源码已经公开，GitHub Release 尚未产出，也不是最终全绿状态**。
+> 当前工作树已推进到连续 schema `0001..0039`，并因公开的 `v1.0.0` 首次发行门禁失败而进入 `v1.0.1` 补丁发行收口。**源码已经公开，但 GitHub Release 尚未产出；只允许在同一个精确候选提交的完整 CI 与 Security 全绿后创建新标签**。
 >
-> fresh-v37 的 `43/43`、workspace `556/0/5` 和真实 GGUF E2E 是新增 0038/0039、模型目录与公网网关之前的历史证据。当前树已通过全 workspace check/strict Clippy、全 workspace `589/0/5`，并在一次性 PostgreSQL 17 中以每 binary 独立数据库完成 fresh-v39 `49/49`；API Key 网关的非流式与 Standard SSE 事务 E2E 均已通过。公开 Actions 已真实通过 macOS arm64/x86_64、Linux x86_64/arm64 与 Windows x86_64 原生编译，以及 macOS Seatbelt 和 Linux 四层沙盒门禁；`v1.0.1` 本机归档又通过 SHA-256、安装、更新检查、重装、默认卸载和 purge 闭环。Qwen3-0.6B 自动部署目标仍只做了 64 KiB 真实有界探测；同一小模型已在当前 macOS 隔离 E2E 中完成整包下载、SHA-256/结构验证和非默认端口健康启动，但该轮在旧脚本检查错端口处停止，尚未形成当前四槽 Standard job 全程证据。完整外部 CI、Windows 安装器、真实 GGUF job 与公网 TLS E2E 仍须以最终流水线结果为准。准确停止点见 [续接文档](docs/HANDOFF.md)。
+> fresh-v37 的 `43/43`、workspace `556/0/5` 和真实 GGUF E2E 是新增 0038/0039、模型目录与公网网关之前的历史证据。当前树已通过全 workspace check/strict Clippy、全 workspace `589/0/5`，并在一次性 PostgreSQL 17 中以每 binary 独立数据库完成 fresh-v39 `49/49`；API Key 网关的非流式与 Standard SSE 事务 E2E 均已通过。公开 Actions 已真实通过 macOS arm64/x86_64、Linux x86_64/arm64 与 Windows x86_64 原生编译，以及 macOS Seatbelt 和 Linux 四层沙盒门禁；`v1.0.1` 本机归档又通过 SHA-256、安装、更新检查、重装、默认卸载和 purge 闭环。Qwen3-0.6B 自动部署目标仍只做了 64 KiB 真实有界探测；同一小模型已在当前 macOS 隔离 E2E 中完成整包下载、SHA-256/结构验证和非默认端口健康启动，但该轮在旧脚本检查错端口处停止，尚未形成当前四槽 Standard job 全程证据。Windows 安装器与当前真实 GGUF job 的最终证据必须来自精确候选提交的 Actions，公网 TLS 另须在独立 Tunnel 创建后验收。准确停止点见 [续接文档](docs/HANDOFF.md)。
 >
-> GitHub 仓库、`main`、旧 `v1.0.0` 标签和 raw 安装器现已公开；旧标签保留且不会强制移动。最新 Security workflow 已全绿，CI `29976996481` 又证明核心质量、fresh-v39/PostgreSQL、五个原生目标、macOS Seatbelt、Linux 四层沙盒和 Unix release smoke 可通过，但 Compose runtime、Windows installer smoke 与真实 GGUF E2E 仍失败。当前未推送增量分别修复原生 Linux file secret 的固定 UID 读取、PowerShell information stream 捕获、无桌面 Linux 的真实 keyutils 凭证库，以及非默认端口的 share 绑定；仍须完成本地门禁并取得新的完整外部全绿，之后才能创建 `v1.0.1` 标签和 Release。
+> GitHub 仓库、`main`、旧 `v1.0.0` 标签和 raw 安装器现已公开；旧标签保留且不会强制移动。Security workflow 与 CI 的既有通过项证明核心质量、fresh-v39/PostgreSQL、五个原生目标、macOS Seatbelt、Linux 四层沙盒和 Unix release smoke 可运行；本补丁序列又修复原生 Linux file secret 的固定 UID 读取、PowerShell information stream 捕获、无桌面 Linux 的真实 keyutils 凭证库，以及非默认端口的 share 绑定。`v1.0.1` 标签和 Release 仍受“精确候选提交的 CI 与 Security 必须同时全绿”约束。
 >
 > 本机 production 当前仍健康运行于 `127.0.0.1:18787`，数据库是 schema v26。已完成只读备份、PostgreSQL 17 恢复验证和隔离副本 `v26→v39` 真实迁移演练，但尚未获得会造成短时 API 中断的维护窗口确认，因此 live 没有停机、迁移或替换二进制。未经明确维护窗口、任务排空、生产 profile 配置和 owner 授权，不得切换 live。
 
