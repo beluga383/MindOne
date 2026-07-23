@@ -258,6 +258,7 @@ fn apply_seccomp() -> Result<(), LinuxSupervisorError> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     rules.insert(libc::SYS_clone, clone_rules);
+    rules.insert(libc::SYS_socket, restricted_socket_rules()?);
     let architecture =
         std::env::consts::ARCH
             .try_into()
@@ -278,6 +279,41 @@ fn apply_seccomp() -> Result<(), LinuxSupervisorError> {
     .map_err(|error: seccompiler::BackendError| LinuxSupervisorError::Seccomp(error.to_string()))?;
     seccompiler::apply_filter(&filter)
         .map_err(|error| LinuxSupervisorError::Seccomp(error.to_string()))
+}
+
+#[cfg(target_os = "linux")]
+fn restricted_socket_rules() -> Result<Vec<seccompiler::SeccompRule>, LinuxSupervisorError> {
+    use seccompiler::{SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompRule};
+
+    const SOCKET_TYPE_MASK: u64 = 0x0f;
+    let condition = |argument_index, operator, value| {
+        SeccompCondition::new(argument_index, SeccompCmpArgLen::Qword, operator, value)
+            .map_err(|error| LinuxSupervisorError::Seccomp(error.to_string()))
+    };
+    let rule = |conditions| {
+        SeccompRule::new(conditions)
+            .map_err(|error| LinuxSupervisorError::Seccomp(error.to_string()))
+    };
+
+    let mut rules = (2_u64..=15)
+        .map(|socket_type| {
+            rule(vec![condition(
+                1,
+                SeccompCmpOp::MaskedEq(SOCKET_TYPE_MASK),
+                socket_type,
+            )?])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    rules.push(rule(vec![
+        condition(0, SeccompCmpOp::Ne, libc::AF_UNIX as u64)?,
+        condition(0, SeccompCmpOp::Ne, libc::AF_INET as u64)?,
+        condition(0, SeccompCmpOp::Ne, libc::AF_INET6 as u64)?,
+    ])?);
+    rules.push(rule(vec![
+        condition(2, SeccompCmpOp::Ne, 0)?,
+        condition(2, SeccompCmpOp::Ne, libc::IPPROTO_TCP as u64)?,
+    ])?);
+    Ok(rules)
 }
 
 #[cfg(target_os = "linux")]
@@ -308,9 +344,8 @@ fn blocked_syscalls() -> Vec<i64> {
         libc::SYS_fanotify_init,
         libc::SYS_acct,
         libc::SYS_quotactl,
+        libc::SYS_io_uring_setup,
         libc::SYS_connect,
-        libc::SYS_sendto,
-        libc::SYS_sendmsg,
         libc::SYS_clone3,
     ]
 }
@@ -340,6 +375,15 @@ mod tests {
         assert!(blocked.contains(&libc::SYS_ptrace));
         assert!(blocked.contains(&libc::SYS_mount));
         assert!(blocked.contains(&libc::SYS_bpf));
+        assert!(blocked.contains(&libc::SYS_io_uring_setup));
         assert!(blocked.contains(&libc::SYS_connect));
+        assert!(!blocked.contains(&libc::SYS_sendto));
+        assert!(!blocked.contains(&libc::SYS_sendmsg));
+        assert_eq!(
+            super::restricted_socket_rules()
+                .expect("socket profile 应可编译")
+                .len(),
+            16
+        );
     }
 }

@@ -759,8 +759,8 @@ if ! MINDONE_HOME="$NODE_HOME" "$CLI" serve run --model "$MODEL_NAME" \
     else
         startup_log="$NODE_HOME/logs/llama-server-${LLAMA_PORT}.log"
     fi
-    # 此时尚未发送任何推理请求，日志只包含启动参数、模型元数据和沙盒错误；
-    # 输出有界尾部用于区分加载缓慢与监督进程失败。
+    # 此时尚未发送任何推理请求；若引擎在受管无明文日志策略下仍输出启动错误，
+    # 只显示有界尾部用于区分加载缓慢与监督进程失败。
     if [ -f "$startup_log" ]; then
         tail -200 "$startup_log" >&2
     fi

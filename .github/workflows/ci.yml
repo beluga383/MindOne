@@ -1500,7 +1500,7 @@ jobs:
             if ($LASTEXITCODE -ne 0 -or $help -notmatch "MindOne" -or $help -notmatch "用法") {
               throw "中文帮助冒烟失败"
             }
-            $launchOutput = (& ./scripts/install.ps1 -Launch 2>&1 | Out-String)
+            $launchOutput = (& ./scripts/install.ps1 -Launch *>&1 | Out-String)
             if ($LASTEXITCODE -ne 0 -or
                 $launchOutput -notmatch "当前不是交互式终端" -or
                 $launchOutput -notmatch "用法") {

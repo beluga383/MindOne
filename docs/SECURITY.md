@@ -32,6 +32,8 @@ MindOne 防御：
 
 官方 CLI 从当前推理进程启动计划的 `applied` 集合生成服务状态和节点登记，只报告本次启动实际应用的机制，不把内核支持、能力探测或计划中的机制写成已应用。Linux 只有实际组合应用 namespace、seccomp-bpf 与 Landlock 才是 Standard，降级路径只报告真正应用的子集；macOS 只有实际 Seatbelt/App Sandbox 才能达到 Standard-Limited，且最高仍为 Standard-Limited；当前官方 Windows 路径只在监督进程实际创建并持续持有 Job Object 时报告该机制，等级仍为 Experimental。Windows Job Object 只约束进程生命周期，不构成或宣称文件系统、网络沙箱；未使用监督进程时不报告已应用机制。
 
+Linux 回环服务与宿主共享 network namespace，但 seccomp 只允许 Unix/IPv4/IPv6 的 TCP stream socket（默认协议或 TCP），拒绝 UDP、raw、其他 socket 类型/协议、主动 `connect` 和 `io_uring` 建立路径。已接受的回环 TCP 连接可使用 `sendto`/`sendmsg` 发回健康检查与推理响应；由于主动连接和非 stream socket 都被拒绝，这不开放引擎主动外连。原生 Linux gate 同时真实验证回环响应成功、主动 TCP 连接失败和 UDP socket 创建失败。
+
 受管 llama.cpp 的 CPU-only 是类型化启动策略，不是可由高级参数拼接的字符串。macOS Seatbelt 路径始终生效；其他平台在显式 `cpu_only: true` 时生效。管理器固定注入 `--device none`、`--n-gpu-layers 0`、`--no-kv-offload` 和 `--no-op-offload`，拒绝高级配置中的设备/GPU/offload 覆盖，并从子进程环境移除 `LLAMA_ARG_DEVICE`、`LLAMA_ARG_N_GPU_LAYERS`、`LLAMA_ARG_KV_OFFLOAD`、`LLAMA_ARG_NO_KV_OFFLOAD` 与 `LLAMA_ARG_NO_OP_OFFLOAD`。因此父进程环境或 YAML 不能悄悄重新启用 Metal/GPU，也不能把不受信 `--device` 冒充受管 CPU-only。
 
 `share publish` 会把实际生效策略写入本地 `runtime/node-policy.json`。活动 worker 在领取前、执行前和心跳/状态路径只读取这份持久化策略；文件缺失、损坏、是符号链接、不是普通文件，或内容不满足 `max_concurrent=1..3` 与标签规范化约束时一律 fail-closed，不回退到默认允许策略。默认策略只用于未发布时的初始化或显式配置流程。
