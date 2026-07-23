@@ -74,14 +74,73 @@ pub fn detect_hardware() -> HardwareProfile {
 
 #[cfg(target_os = "macos")]
 fn detect_metal() -> bool {
+    let json = Command::new("/usr/sbin/system_profiler")
+        .args(["-json", "SPDisplaysDataType"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| metal_supported_from_profiler_json(&output.stdout));
+    if json {
+        return true;
+    }
+
+    // 旧版 macOS 的 JSON 可能没有 Metal family 字段；仅在该情况下回退到
+    // system_profiler 的历史英文标签。当前版本使用 “Metal Support: Metal 4”，
+    // 较旧版本使用 “Metal: Supported”。
     Command::new("/usr/sbin/system_profiler")
         .arg("SPDisplaysDataType")
         .output()
         .ok()
         .filter(|output| output.status.success())
         .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|text| text.contains("Metal: Supported"))
-        .unwrap_or(false)
+        .is_some_and(|text| metal_supported_from_profiler_text(&text))
+}
+
+#[cfg(target_os = "macos")]
+fn metal_supported_from_profiler_json(bytes: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return false;
+    };
+    value
+        .get("SPDisplaysDataType")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("spdisplays_mtlgpufamilysupport")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|marker| {
+                        marker
+                            .strip_prefix("spdisplays_metal")
+                            .is_some_and(|version| {
+                                !version.is_empty()
+                                    && version.bytes().all(|byte| byte.is_ascii_digit())
+                            })
+                    })
+                    || item
+                        .get("spdisplays_metal")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|marker| {
+                            marker.eq_ignore_ascii_case("supported")
+                                || marker.to_ascii_lowercase().starts_with("supported,")
+                        })
+            })
+        })
+}
+
+#[cfg(target_os = "macos")]
+fn metal_supported_from_profiler_text(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim();
+        line == "Metal: Supported"
+            || line
+                .strip_prefix("Metal Support: Metal ")
+                .is_some_and(|version| {
+                    !version.is_empty()
+                        && version
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || byte == b'.')
+                })
+    })
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -218,6 +277,36 @@ mod tests {
         assert!(matches!(
             profile.recommended_backend.as_str(),
             "metal" | "cuda" | "cpu"
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parses_current_and_legacy_macos_metal_capability_without_false_positive() {
+        let current = br#"{
+            "SPDisplaysDataType": [{
+                "sppci_model": "Apple M4",
+                "spdisplays_mtlgpufamilysupport": "spdisplays_metal4"
+            }]
+        }"#;
+        assert!(metal_supported_from_profiler_json(current));
+        assert!(metal_supported_from_profiler_text(
+            "Chipset Model: Apple M4\n      Metal Support: Metal 4\n"
+        ));
+        assert!(metal_supported_from_profiler_text(
+            "Chipset Model: Apple M1\n      Metal: Supported\n"
+        ));
+
+        let unsupported = br#"{
+            "SPDisplaysDataType": [{
+                "sppci_model": "Legacy GPU",
+                "spdisplays_mtlgpufamilysupport": "spdisplays_metal_unsupported",
+                "spdisplays_metal": "Unsupported"
+            }]
+        }"#;
+        assert!(!metal_supported_from_profiler_json(unsupported));
+        assert!(!metal_supported_from_profiler_text(
+            "Chipset Model: Legacy GPU\n      Metal: Unsupported\n"
         ));
     }
 
