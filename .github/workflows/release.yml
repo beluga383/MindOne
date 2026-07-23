@@ -99,8 +99,6 @@ jobs:
           --health-interval 2s
           --health-timeout 2s
           --health-retries 30
-    env:
-      DATABASE_URL: postgres://postgres@127.0.0.1:5432/mindone_release_test
     steps:
       - name: 检出待发行源码
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -127,6 +125,9 @@ jobs:
         run: cargo test --locked --workspace --all-features
 
       - name: 运行 PostgreSQL 迁移与完整 API 集成测试
+        env:
+          DATABASE_URL: postgres://postgres@127.0.0.1:5432/mindone_release_test
+          MINDONE_REQUIRE_POSTGRES_TESTS: "1"
         run: cargo test --locked -p mindone-coordinator --test postgres_integration -- --nocapture
 
       - name: 安装并运行 RustSec 审计

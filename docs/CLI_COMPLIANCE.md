@@ -24,7 +24,7 @@
 | 历史 fresh PostgreSQL `mindone_gate_0036_full_20260719b` 上的 13 个 coordinator integration binary | 合计 `41/41`、无 skip；sqlx metadata `36|1|36|t` | 只证明历史 v36；证据库必须保留，不得复用或清理 |
 | 当前 migration / fresh v39 数据库 | migration 文件连续 `0001..0039`；一次性 PostgreSQL 17 上 16 个 binary 各用独立数据库，合计 `49/49`、无 skip；持久库 metadata `39|1|39|t` | 独立数据库避免 `database_role` 的故意错误 HMAC commitment 污染其他 binary；不替代 production 升级 |
 | macOS Seatbelt ignored/env-gated gate | 当前显式运行 `MINDONE_REAL_SEATBELT_TEST=1` 为 1/1 passed，覆盖允许目标写入、拒绝越权写入和拒绝 sibling 模型；普通 workspace 测试仍保持 ignored | 当前本机真实门禁通过；仍需 macOS Actions 在干净 runner 复验 |
-| Shell / release 安装卸载 smoke | 当前 `mindone 1.0.1` / `aarch64-apple-darwin` 二进制已通过归档 SHA-256、安装、`--check`、重装、中文帮助/版本、doctor JSON、默认保留数据卸载与 purge | 仅为本机 unsigned local smoke；不替代 GitHub Release、Actions、SBOM、Sigstore 或平台签名 |
+| Shell / release 安装卸载 smoke | 当前 `mindone 1.0.2` / `aarch64-apple-darwin` 二进制已通过归档 SHA-256、安装、`--check`、重装、中文帮助/版本、doctor JSON、默认保留数据卸载与 purge | 仅为本机 unsigned local smoke；不替代 GitHub Release、Actions、SBOM、Sigstore 或平台签名 |
 | RustSec、cargo-deny、Gitleaks、actionlint | 当前树使用 cargo-audit 0.22.2 联网刷新到 1167 条 advisory 后扫描 489 个 lockfile 依赖，0 vulnerability / 0 warning；`cargo deny check` 与 actionlint 1.7.12 退出 0，3 个 workflow YAML 均可解析；Gitleaks 8.30.1 对排除本机构建缓存后的 237 个实际项目文件（约 4.38 MB）扫描通过。公开 Security workflow 的 RustSec、cargo-deny 与完整 Git 历史 Gitleaks 已在候选提交上 3/3 通过。TUI 已升级到 ratatui 0.30.2 / crossterm 0.29，移除旧 `lru 0.12.5` 与 `paste`，advisory ignore 为空 | 依赖数据库已在本轮刷新；正式发行仍要求标签所指精确提交的 Security 与 CI 同时全绿 |
 | Compose 静态配置门禁 | base、Cloudflare public overlay、quality operator overlay、dev 的规范化 Compose 断言全部通过，4/4 | 只证明当前配置结构；专用 Cloudflare tunnel、hostname 与公网请求仍待用户确认后的外部验证 |
 | 本机 production 备份、升级与切换 | 当前 v26 custom dump 已校验 328 项 TOC 并恢复到独立 PostgreSQL 17；修复 migration 14 末尾空行 checksum 漂移后，恢复副本真实 `26→39` 成功，metadata `39|1|39|t`，0037/0038/0039 对象与零业务行保持均已核对；live 仍为 `26|1|26|t` | live coordinator 尚未停止、迁移或切换；短时 API 中断需单独明确确认，不能把恢复副本冒充 production |
@@ -254,7 +254,7 @@
 | 两个隔离 Home 的真实 llama.cpp + GGUF E2E | 历史 debug 树从头通过；公开 Linux Actions 又以当前四槽/统一 KV 参数和 PostgreSQL v39 完成双账号/device、public canary、非流式双端点、两类 SSE、游标恢复、密文、三轨唯一结算、策略拒绝零结算、Regulated 流式拒绝、slot erase 与清理 | 端口感知日志扫描修复后的精确候选 CI 仍须全绿；private 双 GGUF、真实 TEE、外部 SMTP、签名发布和 production 不在该证据内 |
 | private HMAC v2、预算与 terminal capability | fresh-v39 `49/49` 覆盖跨 catalog 真重叠双 `PgPool`、key-state、v2 raw-null、设备绑定与 terminal capability | production v26 未配置 key/预算/catalog，不能宣称启用 |
 | Cloudflare 五项公网安全测试 | HTTPS、未认证拒绝、正确 Token、数据库与 llama-server 端口不可见 | 待外部验证；执行路由保存前需用户确认 |
-| 安装、版本、中文帮助、doctor、卸载无残留 | 当前 `mindone 1.0.1` 已在 macOS arm64 完成本轮 release smoke；Linux 用户态和公开 Windows Actions 也完成相应安装/帮助/doctor/PATH/卸载合同 | 正式 Release 资产尚未生成；Windows 交互 TUI 和模型启动由用户真机验收 |
+| 安装、版本、中文帮助、doctor、卸载无残留 | 当前 `mindone 1.0.2` 已在 macOS arm64 完成本轮 release smoke；Linux 用户态和公开 Windows Actions 也完成相应安装/帮助/doctor/PATH/卸载合同 | 正式 Release 资产尚未生成；Windows 交互 TUI 和模型启动由用户真机验收 |
 | Linux 四层沙盒与 macOS Seatbelt 真实 allow/deny | 两项真实测试均为 `#[ignore]` 并分别要求显式环境开关；当前 macOS 本机和公开 Actions、Linux 四层公开 Actions 均已通过，普通 workspace test 不能把 ignored/unavailable 当通过 | 精确发行候选仍须复用同一门禁 |
 | RustSec、cargo-deny、Gitleaks 与 workflow/script 静态门禁 | cargo-audit 0.22.2 本轮联网刷新到 1167 条 advisory 后为 0 vulnerability / 0 warning；`cargo deny check`、actionlint、workflow/Shell 语法和本地 Gitleaks 均退出 0；公开 Security workflow 的三项 job 已在候选提交通过 | 正式发行要求标签所指精确提交再次全绿 |
 | 正式代码签名/notarization | Apple/Windows 官方工具的签名与验证输出；未取得证据时发行页与包内必须明确标为未签名/notarization 未完成，不能把稳定版本通道冒充为已签名 | 待外部验证；当前 workflow 会按实际 Secret 结果披露，不伪造签名 |
