@@ -459,6 +459,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.validate-tag.outputs.tag }}
           IS_PRERELEASE: ${{ needs.validate-tag.outputs.prerelease }}
         run: |

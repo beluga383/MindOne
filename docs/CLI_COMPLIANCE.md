@@ -42,7 +42,7 @@
 | `--verbose` 与 quiet 冲突；TUI 命令按自身 verbose 级别输出日志 | `crates/mindone-cli/src/cli.rs`、`crates/mindone-cli/src/tui.rs` | `cli::tests::quiet_conflicts_with_verbose`、TUI 全局参数解析测试 | 完成（本地自动测试）；TUI 执行期间按命令级 subscriber 应用 warn/info/debug/trace |
 | 公开子命令集合 | `auth api model engine serve share quota node config doctor help`；内部 worker 隐藏于 `crates/mindone-cli/src/cli.rs` | `root_help_contains_all_public_commands_and_chinese`、`every_public_leaf_command_has_a_successful_parse_case`、缺失/非法/冲突三组参数矩阵；当前 40 个公开叶子全覆盖 | 完成（本地定向测试） |
 | 终端图形界面（TUI）：交互式终端裸 `mindone` 或 `mindone ui` 启动；新版工作台用 Space/Action/Overview/Activity/Command 分层，10 类/40 个动作与全部公开 CLI 叶子精确对应；`M` 打开 65 模型选择器、推荐置顶并可过滤，`R` 推荐、`D` 自动部署、`?` 帮助；可编辑完整参数并复用同一 Clap 与 `app::execute`；非 TTY 回退帮助/明确错误 | `crates/mindone-cli/src/tui.rs`、`crates/mindone-cli/src/main.rs` | `tui::tests` 确定性覆盖连续分区、40 公开叶子精确集合、模型选择器 65 项/推荐/过滤/命令路由、宽屏与紧凑渲染、安全分词、内部 worker/不完整参数拒绝、确认风险全集、状态机和非零 `exit_code` 保留；`cli_contract` 另验证非 TTY 裸调用输出中文帮助并成功退出；真实 80×24 PTY 检查主界面、模型弹层和终端恢复 | 完成（本地自动与 PTY 测试）；`1-9`/`0` 访问全部 10 类，低于 68×20 明确提示调整窗口 |
-| 远程单命令安装后直接进入 TUI | Unix `install.sh --launch`、Windows `install.ps1 -Launch`；交互式终端启动已安装 CLI，非交互/CI 安全降级为真实帮助页；默认只写当前用户受管 PATH，可显式关闭 | Unix release smoke 验证受管 PATH 唯一性、新 shell 裸 `mindone` 与卸载清理；Windows Actions 验证用户 PATH/当前进程 PATH、裸命令、`-Launch` 降级与卸载 | raw 安装器已公开；正式 Release 资产尚未生成，因此远程安装会失败关闭；Windows 交互 TUI 仍待用户真机 |
+| 远程单命令安装后直接进入 TUI | Unix `install.sh --launch`、Windows `install.ps1 -Launch`；交互式终端启动已安装 CLI，非交互/CI 安全降级为真实帮助页；默认只写当前用户受管 PATH，可显式关闭 | Unix release smoke 验证受管 PATH 唯一性、新 shell 裸 `mindone` 与卸载清理；Windows Actions 验证用户 PATH/当前进程 PATH、裸命令、`-Launch` 降级与卸载；v1.0.2 latest 资产和 checksum 直链返回 200 | 远程安装资产已发布；Windows 交互 TUI 和模型启动仍待用户真机 |
 
 ### 1.1 公开叶子命令与参数合同
 
@@ -241,7 +241,7 @@
 | Unix 卸载：默认保留数据，显式 purge，父链/目标 symlink、宽路径、孤儿服务状态与非 MindOne 文件 fail closed | `scripts/uninstall.sh` | release smoke 验证默认卸载保留数据、移除受管 PATH 块与 `--purge-data`；负向门禁有定向证据 | 三个 Unix 用户态目标与公开 Linux 安装/卸载门禁通过 |
 | Windows 安装：与 Unix 对齐的合同、checksum、zip 精确清单、原子覆盖更新、拒绝重解析链、用户 PATH | `scripts/install.ps1`、`.cargo/config.toml`、`scripts/verify-windows-self-contained.ps1` | PowerShell 7.5 解析、x86_64 MSVC 交叉 check/严格 Clippy/静态 PE 审计通过；公开 Windows Runner 进一步验证原生编译、`dumpbin`、用户/进程 PATH、裸命令、`-Launch`、`-NoModifyPath`、空项/空格/尾分隔符无损保留、替换与拒绝边界 | 原生安装合同已通过 Actions；交互 TUI、Credential Manager、Job Object 生命周期和模型启动仍待用户真机 |
 | Windows 卸载：默认保留数据，`-PurgeData` 才删除；精确清理安装目录 PATH；拒绝 root/user/reparse/非规范/外部项/缺 CLI 的服务状态 | `scripts/uninstall.ps1` | Windows Actions 已覆盖保留、彻底删除、其他 PATH 项逐字节恢复、服务安全停止与拒绝边界 | 原生 Actions 通过；用户真机仍作最终平台验收 |
-| 多平台构建、发行 checksum、SBOM/provenance、可选平台签名 | `.github/workflows/ci.yml`、`.github/workflows/release.yml`、`.github/workflows/security.yml`、`deny.toml` | Release 先验证标签提交可达 `main`，再复用同一提交的完整 CI（含 Linux/macOS 沙盒与 Unix/Windows 安装门禁）；Windows 包还必须通过静态 CRT/Job Object `dumpbin` 门禁。CI 与 Security 已有公开运行链接和多轮证据 | 正式标签、Release 资产上传、SBOM/provenance 与实际签名状态仍待发布流水线 |
+| 多平台构建、发行 checksum、SBOM/provenance、可选平台签名 | `.github/workflows/ci.yml`、`.github/workflows/release.yml`、`.github/workflows/security.yml`、`deny.toml` | v1.0.2 先验证标签与 `main`，再复用完整 CI、安全/数据库复验并生成五平台包；11 个 Release 资产、SPDX SBOM、Sigstore bundle 均已上传，五个包的 GitHub provenance 已逐个验证 | 发行完成；Apple Developer ID/notarization 与 Windows Authenticode 未配置并已如实披露 |
 | Apple Developer ID / notarization、Windows Authenticode | `.github/workflows/release.yml`、发行 `CODE_SIGNING.txt` | 只有配置真实证书 Secret 才签名；macOS notarization 尚未接入。正式 SemVer 与预发布通道只由标签决定，签名状态则在发行页 `SIGNING_STATUS.txt` 和包内 `CODE_SIGNING.txt` 独立、如实披露，稳定通道不代表已有平台原生签名 | 待外部验证 |
 
 ## 13. 完成时总体验收
@@ -251,14 +251,14 @@
 | 最终 fmt、strict clippy、workspace tests | 当前 31 个 result set 为 `590 passed / 0 failed / 5 ignored`，退出 0；macOS 本机、Windows x86_64 MSVC 交叉环境与公开 Actions 的核心质量门均通过 | 5 ignored 是外部/平台门禁，不冒充通过；发行仍要求精确候选完整 CI 终态 |
 | Rust 1.88 MSRV | 当前 all-target/all-feature check 与公开 Actions MSRV 门禁已通过 | 后续精确发行候选仍须重跑 |
 | PostgreSQL migrations、最小权限角色与完整 API 集成 | 当前源码连续 `0001..0039`；fresh-v39 16 个 binary 各用独立数据库，合计 `49/49`、无 skip，覆盖最小 ACL、速度档调度与 API Key/OpenAI JSON + Standard SSE 网关 E2E | live production 仍为 `26|1|26|t`，严禁把测试结果冒充 production 切换 |
-| 两个隔离 Home 的真实 llama.cpp + GGUF E2E | 历史 debug 树从头通过；公开 Linux Actions 又以当前四槽/统一 KV 参数和 PostgreSQL v39 完成双账号/device、public canary、非流式双端点、两类 SSE、游标恢复、密文、三轨唯一结算、策略拒绝零结算、Regulated 流式拒绝、slot erase 与清理 | 端口感知日志扫描修复后的精确候选 CI 仍须全绿；private 双 GGUF、真实 TEE、外部 SMTP、签名发布和 production 不在该证据内 |
+| 两个隔离 Home 的真实 llama.cpp + GGUF E2E | 历史 debug 树从头通过；v1.0.2 精确标签的公开 Linux Actions 又以当前四槽/统一 KV 参数和 PostgreSQL v39 完成双账号/device、public canary、非流式双端点、两类 SSE、游标恢复、密文、三轨唯一结算、策略拒绝零结算、Regulated 流式拒绝、slot erase、端口感知日志审计与清理 | 当前 CPU-only Standard 单模型链完成；private 双 GGUF、真实 TEE、外部 SMTP 和 production 不在该证据内 |
 | private HMAC v2、预算与 terminal capability | fresh-v39 `49/49` 覆盖跨 catalog 真重叠双 `PgPool`、key-state、v2 raw-null、设备绑定与 terminal capability | production v26 未配置 key/预算/catalog，不能宣称启用 |
 | Cloudflare 五项公网安全测试 | HTTPS、未认证拒绝、正确 Token、数据库与 llama-server 端口不可见 | 待外部验证；执行路由保存前需用户确认 |
-| 安装、版本、中文帮助、doctor、卸载无残留 | 当前 `mindone 1.0.2` 已在 macOS arm64 完成本轮 release smoke；Linux 用户态和公开 Windows Actions 也完成相应安装/帮助/doctor/PATH/卸载合同 | 正式 Release 资产尚未生成；Windows 交互 TUI 和模型启动由用户真机验收 |
+| 安装、版本、中文帮助、doctor、卸载无残留 | `mindone 1.0.2` 已在 macOS arm64 完成本地 release smoke；Linux 用户态、公开 Windows Actions 及五平台 Release 资产也完成相应分层合同 | 远程资产已发布；Windows 交互 TUI 和模型启动由用户真机验收 |
 | Linux 四层沙盒与 macOS Seatbelt 真实 allow/deny | 两项真实测试均为 `#[ignore]` 并分别要求显式环境开关；当前 macOS 本机和公开 Actions、Linux 四层公开 Actions 均已通过，普通 workspace test 不能把 ignored/unavailable 当通过 | 精确发行候选仍须复用同一门禁 |
 | RustSec、cargo-deny、Gitleaks 与 workflow/script 静态门禁 | cargo-audit 0.22.2 本轮联网刷新到 1167 条 advisory 后为 0 vulnerability / 0 warning；`cargo deny check`、actionlint、workflow/Shell 语法和本地 Gitleaks 均退出 0；公开 Security workflow 的三项 job 已在候选提交通过 | 正式发行要求标签所指精确提交再次全绿 |
 | 正式代码签名/notarization | Apple/Windows 官方工具的签名与验证输出；未取得证据时发行页与包内必须明确标为未签名/notarization 未完成，不能把稳定版本通道冒充为已签名 | 待外部验证；当前 workflow 会按实际 Secret 结果披露，不伪造签名 |
 | 真实 SEV-SNP/TDX 证明与 Regulated E2E | 目标 guest 的真实 quote/report、厂商 collateral、固定 verifier、measurement allowlist、TEE adapter、密文推理与结果解密 | 待外部验证；软件测试通过不能替代 |
 | 分支推送、PR 与 GitHub Actions | PR URL、所有 required checks 绿色；不自动合并 | 待外部验证 |
 
-当前源码的 40 个公开叶子参数矩阵和 TUI 10 类映射已落盘并通过完整 CLI 与 workspace 门禁；HF 日常小模型部署探测只读取 64 KiB 后断开。按端口并行运行多个本地受管实例已实现并通过状态隔离/在用保护的确定性测试，没有下载第二个真实模型。当前 workspace `590/0/5`、fresh-v39 `49/49`、Unix/Windows 安装门禁、macOS Seatbelt、Linux 四层沙盒、五目标原生编译、当前四槽 CPU-only 小模型业务链与 API Key 网关 JSON/SSE 数据库 E2E 均已有真实证据；Windows 真机交互/模型启动、公网 API 子域 TLS、外部 SMTP、签名发布、private 双 GGUF、真实 TEE 与 production live 切换仍未完成。
+当前源码的 40 个公开叶子参数矩阵和 TUI 10 类映射已落盘并通过完整 CLI 与 workspace 门禁；HF 日常小模型部署探测只读取 64 KiB 后断开。按端口并行运行多个本地受管实例已实现并通过状态隔离/在用保护的确定性测试，没有下载第二个真实模型。当前 workspace `590/0/5`、fresh-v39 `49/49`、Unix/Windows 安装门禁、macOS Seatbelt、Linux 四层沙盒、五目标原生编译、当前四槽 CPU-only 小模型业务链、API Key 网关 JSON/SSE 数据库 E2E 和 v1.0.2 五平台发行均已有真实证据；Windows 真机交互/模型启动、公网 API 子域 TLS、外部 SMTP、Apple/Windows 平台原生签名、private 双 GGUF、真实 TEE 与 production live 切换仍未完成。
