@@ -437,6 +437,13 @@ pub struct SharePublishArgs {
     /// 要发布的已验证模型
     #[arg(long)]
     pub model: String,
+    /// 要发布的受管本地服务端口
+    #[arg(
+        long,
+        default_value_t = 8080,
+        value_parser = clap::value_parser!(u16).range(1..)
+    )]
+    pub port: u16,
     /// 节点自定义别名
     #[arg(long)]
     pub alias: Option<String>,
@@ -1398,6 +1405,8 @@ mod tests {
                     "publish",
                     "--model",
                     "demo",
+                    "--port",
+                    "18080",
                     "--alias",
                     "node-a",
                     "--tags",

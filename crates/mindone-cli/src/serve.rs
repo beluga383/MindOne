@@ -171,8 +171,8 @@ pub async fn status(context: &AppContext, args: &ServeStatusArgs) -> CliResult<C
     )
 }
 
-pub async fn load_state(context: &AppContext) -> CliResult<ActiveServeState> {
-    let status = manager(context, DEFAULT_PORT)?
+pub async fn load_state(context: &AppContext, port: u16) -> CliResult<ActiveServeState> {
+    let status = manager(context, port)?
         .status()
         .await
         .map_err(serve_error)?;

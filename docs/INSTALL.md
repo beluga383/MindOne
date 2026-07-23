@@ -221,11 +221,11 @@ mindone serve status --port 8081
 ```bash
 mindone node policy set --reject-tags nsfw,heavy-math --max-concurrent 1
 mindone node threshold set --gpu-temp-limit 75 --vram-reserve 4
-mindone share publish --model qwen3-0.6b --alias my-node --tags code,math
+mindone share publish --model qwen3-0.6b --port 8080 --alias my-node --tags code,math
 mindone share stats
 ```
 
-`--max-concurrent` 可设为 `1..=3`；示例中的 `1` 是节点主主动收紧，而不是实现上限。节点通过出站连接心跳和领取任务，不开放 llama-server 公网端口。standard/fast 只使用整台空闲贡献端，slow 才会在该真实上限内装箱。
+`--max-concurrent` 可设为 `1..=3`；示例中的 `1` 是节点主主动收紧，而不是实现上限。`share publish --port` 选择该端口上已经健康运行且模型一致的受管实例；省略时使用 `8080`。节点通过出站连接心跳和领取任务，不开放 llama-server 公网端口。standard/fast 只使用整台空闲贡献端，slow 才会在该真实上限内装箱。
 
 ## 6. 消费额度与 OpenAI 兼容调用
 
@@ -320,7 +320,21 @@ CARGO_NET_OFFLINE=true \
 sh scripts/e2e-test.sh
 ```
 
+无桌面 Linux runner 没有 DBus Secret Service 时，可以把这一轮测试包在独立内核 keyring session 内，并显式选择真实 keyutils 凭证库：
+
+```bash
+keyctl session -- sh -c '
+  export MINDONE_LINUX_CREDENTIAL_STORE=keyutils
+  export MINDONE_E2E_LLAMA_PORT=18082
+  sh scripts/e2e-test.sh
+'
+```
+
+`keyutils` 不把 Token 或设备私钥落盘，但该 session 在重启或内核回收后不会保留登录，适合无桌面的临时 runner。Linux 桌面默认仍使用 Secret Service；macOS 和 Windows 不读取这个 Linux 专用选项。
+
 2026-07-22 当前 macOS arm64 工作树已用上述隔离配置通过：真实非流式 chat/completions、两个端点的 SSE 动态增量、连续游标及数据库故障恢复、Standard AEAD/HMAC 静态存储、公开 canary 收口、领取后策略复核失败且零结算、三轨唯一结算、Regulated `stream:true` 拒绝、Prompt/Response 日志扫描和清理均得到验证。该运行使用 debug 二进制、`local-development` 和 CPU-only Seatbelt；它不证明 release/签名产物、email SMTP/浏览器、公网 TLS、production 升级、GPU/其他平台、真实 private catalog 多实例仲裁或 SNP/TDX Regulated 硬件可用。
+
+2026-07-23 当前四槽版本另用 `18082` 完成 Qwen3-0.6B-Q4_0 整包下载、SHA-256/结构验证、b10064 启动和 `/health`；随后旧脚本因 `serve status` 漏传端口而在默认 `8080` 误报未运行。脚本现已把 status、publish、stop 和清理全部绑定 `MINDONE_E2E_LLAMA_PORT`，`share publish` 也会持久化并复验所选端口；这轮尚未完成后续真实 Standard job，所以仍以新的外部 CI 为最终证据。
 
 ## 10. 数据目录
 

@@ -167,7 +167,8 @@ cleanup() {
                 >>"$LOG_DIR/cleanup.log" 2>&1
         fi
         if [ "$SERVING" -eq 1 ]; then
-            MINDONE_HOME="$NODE_HOME" "$CLI" serve stop --timeout 5 --quiet \
+            MINDONE_HOME="$NODE_HOME" "$CLI" serve stop --port "$LLAMA_PORT" \
+                --timeout 5 --quiet \
                 >>"$LOG_DIR/cleanup.log" 2>&1
         fi
         if [ "$CONSUMER_LOGGED_IN" -eq 1 ]; then
@@ -652,12 +653,20 @@ for home in "$NODE_HOME" "$CONSUMER_HOME"; do
     MINDONE_HOME="$home" "$CLI" config set server.url \
         "http://127.0.0.1:${COORDINATOR_PORT}" --quiet
 done
-MINDONE_HOME="$NODE_HOME" "$CLI" auth login --no-open --json \
-    >"$TEMP_ROOT/node-login.json" 2>"$LOG_DIR/node-login.log"
+if ! MINDONE_HOME="$NODE_HOME" "$CLI" auth login --no-open --json \
+    >"$TEMP_ROOT/node-login.json" 2>"$LOG_DIR/node-login.log"; then
+    cat "$TEMP_ROOT/node-login.json" >&2 2>/dev/null || true
+    cat "$LOG_DIR/node-login.log" >&2 2>/dev/null || true
+    die "节点账号登录失败"
+fi
 assert_cli_ok "$TEMP_ROOT/node-login.json"
 NODE_LOGGED_IN=1
-MINDONE_HOME="$CONSUMER_HOME" "$CLI" auth login --no-open --json \
-    >"$TEMP_ROOT/consumer-login.json" 2>"$LOG_DIR/consumer-login.log"
+if ! MINDONE_HOME="$CONSUMER_HOME" "$CLI" auth login --no-open --json \
+    >"$TEMP_ROOT/consumer-login.json" 2>"$LOG_DIR/consumer-login.log"; then
+    cat "$TEMP_ROOT/consumer-login.json" >&2 2>/dev/null || true
+    cat "$LOG_DIR/consumer-login.log" >&2 2>/dev/null || true
+    die "消费者账号登录失败"
+fi
 assert_cli_ok "$TEMP_ROOT/consumer-login.json"
 CONSUMER_LOGGED_IN=1
 python3 - "$TEMP_ROOT/node-login.json" "$TEMP_ROOT/consumer-login.json" <<'PY'
@@ -747,7 +756,8 @@ assert_cli_ok "$TEMP_ROOT/serve.json"
 SERVING=1
 wait_http_status "http://127.0.0.1:${LLAMA_PORT}/health" 200 30 \
     || die "llama-server /health 未就绪"
-MINDONE_HOME="$NODE_HOME" "$CLI" serve status --json >"$TEMP_ROOT/serve-status.json"
+MINDONE_HOME="$NODE_HOME" "$CLI" serve status --port "$LLAMA_PORT" --json \
+    >"$TEMP_ROOT/serve-status.json"
 assert_cli_ok "$TEMP_ROOT/serve-status.json"
 expected_trust=$(python3 - "$TEMP_ROOT/serve.json" "$TEMP_ROOT/serve-status.json" <<'PY'
 import json
@@ -780,7 +790,7 @@ PY
 )
 
 step "发布贡献节点并确认真实心跳在线"
-MINDONE_HOME="$NODE_HOME" "$CLI" share publish --model "$MODEL_NAME" \
+MINDONE_HOME="$NODE_HOME" "$CLI" share publish --model "$MODEL_NAME" --port "$LLAMA_PORT" \
     --alias e2e-node-b --tags e2e,gguf --json >"$TEMP_ROOT/publish.json"
 assert_cli_ok "$TEMP_ROOT/publish.json"
 PUBLISHED=1
@@ -2107,7 +2117,8 @@ PUBLISHED=0
 published_count=$(docker exec "$DB_CONTAINER" psql -U mindone -d mindone_e2e -At \
     -c "SELECT COUNT(*) FROM model_instances WHERE status = 'published'")
 [ "$published_count" -eq 0 ] || die "数据库仍有发布中的模型实例"
-MINDONE_HOME="$NODE_HOME" "$CLI" serve stop --timeout 15 --json >"$TEMP_ROOT/stop.json"
+MINDONE_HOME="$NODE_HOME" "$CLI" serve stop --port "$LLAMA_PORT" --timeout 15 --json \
+    >"$TEMP_ROOT/stop.json"
 assert_cli_ok "$TEMP_ROOT/stop.json"
 SERVING=0
 assert_port_closed "$LLAMA_PORT" || die "停止后 llama-server 端口仍开放"

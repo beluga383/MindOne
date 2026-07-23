@@ -187,6 +187,11 @@ jobs:
             "$MINDONE_QUALITY_KEYS_HOST_DIR" \
             "$MINDONE_QUALITY_EVIDENCE_HOST_DIR"
           openssl rand -hex 32 > "$MINDONE_STANDARD_DATA_KEY_FILE"
+          # 原生 Linux 的 Compose file secret 是 bind mount，不会重写宿主
+          # uid/mode。生产镜像以固定 10001 运行，因此只把该 Secret 交给
+          # 同一数值 UID，不能用 0644 绕过读取边界。
+          sudo chown 10001:10001 "$MINDONE_STANDARD_DATA_KEY_FILE"
+          sudo chmod 0400 "$MINDONE_STANDARD_DATA_KEY_FILE"
           {
             printf '%s' 'mindone-private-hidden-hmac-v1:'
             openssl rand -hex 32
@@ -430,16 +435,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose --env-file /dev/null \
-            -f deploy/docker-compose.yml \
-            -f deploy/docker-compose.cloudflared.yml \
-            up -d --build postgres coordinator
+          compose=(
+            docker compose --env-file /dev/null
+            -f deploy/docker-compose.yml
+            -f deploy/docker-compose.cloudflared.yml
+          )
+          if ! "${compose[@]}" up -d --build postgres coordinator; then
+            "${compose[@]}" ps -a || true
+            "${compose[@]}" \
+              logs --tail 100 postgres database-migrator database-role-init coordinator || true
+            exit 1
+          fi
           ready=0
           for _ in $(seq 1 60); do
-            if docker compose --env-file /dev/null \
-              -f deploy/docker-compose.yml \
-              -f deploy/docker-compose.cloudflared.yml \
-              exec -T coordinator \
+            if "${compose[@]}" exec -T coordinator \
               curl -fsS http://127.0.0.1:8787/ready >/dev/null 2>&1; then
               ready=1
               break
@@ -447,12 +456,8 @@ jobs:
             sleep 2
           done
           if test "$ready" -ne 1; then
-            docker compose --env-file /dev/null \
-              -f deploy/docker-compose.yml \
-              -f deploy/docker-compose.cloudflared.yml ps
-            docker compose --env-file /dev/null \
-              -f deploy/docker-compose.yml \
-              -f deploy/docker-compose.cloudflared.yml \
+            "${compose[@]}" ps
+            "${compose[@]}" \
               logs --tail 100 postgres database-migrator database-role-init coordinator
             exit 1
           fi
@@ -1482,7 +1487,7 @@ jobs:
             if ($LASTEXITCODE -ne 0 -or $versionAfterRefusal -cne $expectedVersion) {
               throw "拒绝降级时修改了现有版本：$versionAfterRefusal"
             }
-            $downgradeCheck = (& ./scripts/install.ps1 -Check | Out-String)
+            $downgradeCheck = (& ./scripts/install.ps1 -Check 6>&1 | Out-String)
             if ($downgradeCheck -notmatch "已安装版本 $([regex]::Escape($ciVersion)) 高于所查发行版 0.9.0") {
               throw "更新检查错误地把较旧发行版报告成可更新：$downgradeCheck"
             }
@@ -1755,6 +1760,9 @@ jobs:
         env:
           MINDONE_E2E_PROFILE: release
           MINDONE_E2E_CPU_ONLY: "1"
+          # GitHub runner 没有桌面 DBus/Secret Service；显式使用同一登录
+          # session 内的 Linux 内核 keyutils，仍是真实系统凭证库且不落盘。
+          MINDONE_LINUX_CREDENTIAL_STORE: keyutils
           MINDONE_E2E_LLAMA_VERSION: b10064
           MINDONE_E2E_MODEL_REPO: ggml-org/Qwen3-0.6B-GGUF
           MINDONE_E2E_MODEL_FILE: Qwen3-0.6B-Q4_0.gguf

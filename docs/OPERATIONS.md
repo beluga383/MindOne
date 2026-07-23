@@ -97,7 +97,11 @@ openssl rand -hex 32
 
 不要把输出写入 Git、shell 历史、工单或聊天记录。生产环境应通过部署平台 Secret 管理器注入。
 
-仓库 Compose 模板为了本机单用户部署兼容性，仍从权限受限且 Git 忽略的 `deploy/.env` 注入数据库 owner/runtime 两个独立密码和 token pepper；这些值会出现在容器进程环境和有权限执行 `docker inspect` 的管理员视图中，因此不等同于 Docker Secret。两个数据库密码都应分别使用 URL-safe 随机值，禁止复用。宿主 `deploy/secrets/` 必须保持 `0700`，Standard 数据密钥和 private HMAC 源文件必须分别保持 `0600`，并以两个不同的只读单文件挂载进入 `/run/secrets`；private HMAC 只挂载给常驻 coordinator，不授予不执行 private claim 的 migrator、role-init 或 quality operator。Docker/Compose 在容器 `/run/secrets` 中可能把这种只读文件呈现为 root 所有的 `0444` 或 `0644`；配置只对这个固定容器 Secret 目录接受该表现形式，因为镜像只运行一个 UID/GID `10001:10001` 的非 root coordinator、文件本身只读且没有第二个工作负载。这个例外绝不允许把宿主源文件或其他普通 key 文件放宽为 `0644`。共享主机或更高等级生产环境必须改用平台 Secret 管理器或凭据文件适配器，并限制 Docker daemon 权限。PostgreSQL 私钥、CA 私钥、Standard 数据密钥、private HMAC 和 cloudflared token 只放在 Git/Docker build context 都忽略的 `deploy/secrets/` 或等价仓库外 Secret 存储，不进入环境值或 argv。不要把 `docker compose config` 的完整输出写入日志，因为它会展开数据库密码与 token pepper；`scripts/validate-private-v2-compose.sh` 只使用临时合成占位值，并验证渲染结果不包含 private HMAC 文件内容。
+仓库 Compose 模板为了本机单用户部署兼容性，仍从权限受限且 Git 忽略的 `deploy/.env` 注入数据库 owner/runtime 两个独立密码和 token pepper；这些值会出现在容器进程环境和有权限执行 `docker inspect` 的管理员视图中，因此不等同于 Docker Secret。两个数据库密码都应分别使用 URL-safe 随机值，禁止复用。宿主 `deploy/secrets/` 必须保持 `0700`，Standard 数据密钥和 private HMAC 源文件必须分别按实际容器工作负载最小授权，并以两个不同的只读单文件挂载进入 `/run/secrets`；private HMAC 只挂载给常驻 coordinator，不授予不执行 private claim 的 migrator、role-init 或 quality operator。
+
+原生 Linux 的 Compose file secret 实际是 bind mount，保留宿主 UID 和 mode；它不会像某些 Docker Desktop 文件共享实现那样代理权限。coordinator、migrator 和 role-init 镜像固定以 `10001:10001` 运行，因此它们消费的 Standard 数据密钥（以及启用时只授予 coordinator 的 private HMAC）应由数值 UID/GID `10001:10001` 所有并保持 `0400`，或改由平台 Secret 管理器以等价最小权限投递。不得主动把宿主源文件放宽为 `0644`/`0444` 来绕过读取失败；宿主操作员不能直接读取该文件是预期边界，轮换应通过受审计的特权部署动作完成。macOS/Windows Docker Desktop 可能把只读 Secret 在容器 `/run/secrets` 内代理为 root 所有的 `0444`/`0644`，配置只在这个固定目录窄化接受该平台表现，部署者仍须验证实际工作负载可读；这不授权放宽宿主源文件。共享主机或更高等级生产环境必须使用平台 Secret 管理器或凭据文件适配器，并限制 Docker daemon 权限。
+
+PostgreSQL 私钥、CA 私钥、Standard 数据密钥、private HMAC 和 cloudflared token 只放在 Git/Docker build context 都忽略的 `deploy/secrets/` 或等价仓库外 Secret 存储，不进入环境值或 argv。不要把 `docker compose config` 的完整输出写入日志，因为它会展开数据库密码与 token pepper；`scripts/validate-private-v2-compose.sh` 只使用临时合成占位值，并验证渲染结果不包含 private HMAC 文件内容。
 
 ## 本机源码启动
 
@@ -347,6 +351,11 @@ test ! -e deploy/secrets/standard-data-key
 MINDONE_NEW_PROJECT="mindone-new-$(date +%Y%m%d%H%M%S)"
 scripts/generate-postgres-tls.sh
 (umask 077; set -C; openssl rand -hex 32 > deploy/secrets/standard-data-key)
+# 原生 Linux：file secret 保留宿主 ownership；固定镜像 UID 必须能以最小权限读取
+if [ "$(uname -s)" = Linux ]; then
+  sudo chown 10001:10001 deploy/secrets/standard-data-key
+  sudo chmod 0400 deploy/secrets/standard-data-key
+fi
 (umask 077; set -C; : > deploy/.env)
 cp deploy/.env.example deploy/.env
 chmod 0600 deploy/.env

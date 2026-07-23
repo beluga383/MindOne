@@ -298,7 +298,7 @@ const COMMANDS: [CommandSpec; 40] = [
     CommandSpec {
         path: "share publish",
         title: "发布节点",
-        usage: "mindone share publish --model <模型> [--alias <节点别名>] [--tags <逗号分隔标签>]",
+        usage: "mindone share publish --model <模型> [--port <端口>] [--alias <节点别名>] [--tags <逗号分隔标签>]",
         description: "注册节点和模型实例，启动持久 worker 并等待首次心跳。",
         risk: ActionRisk::Confirm,
     },

@@ -12,10 +12,12 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, account: &str) -> Result<()>;
 }
 
-/// 使用 macOS Keychain、Windows Credential Manager 或 Linux Secret Service 的生产实现。
+/// 使用 macOS Keychain、Windows Credential Manager、Linux Secret Service，
+/// 或 Linux 上显式选择的内核 keyutils 的生产实现。
 #[derive(Debug, Clone)]
 pub struct KeyringSecretStore {
     service: String,
+    backend: KeyringBackend,
 }
 
 impl KeyringSecretStore {
@@ -26,12 +28,65 @@ impl KeyringSecretStore {
                 "系统凭证库 service 名称不能为空".to_owned(),
             ));
         }
-        Ok(Self { service })
+        Ok(Self {
+            service,
+            backend: KeyringBackend::from_environment()?,
+        })
     }
 
     fn entry(&self, account: &str) -> Result<keyring::Entry> {
         validate_account(account)?;
-        keyring::Entry::new(&self.service, account).map_err(keyring_error)
+        self.backend
+            .entry(&self.service, account)
+            .map_err(keyring_error)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum KeyringBackend {
+    PlatformDefault,
+    #[cfg(target_os = "linux")]
+    LinuxKernel,
+}
+
+impl KeyringBackend {
+    fn from_environment() -> Result<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            let value = std::env::var_os("MINDONE_LINUX_CREDENTIAL_STORE");
+            return Self::from_linux_value(value.as_deref());
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(Self::PlatformDefault)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn from_linux_value(value: Option<&std::ffi::OsStr>) -> Result<Self> {
+        match value {
+            Some(value) if value == "keyutils" => Ok(Self::LinuxKernel),
+            Some(value) if value == "secret-service" => Ok(Self::PlatformDefault),
+            Some(value) if value.to_str().is_none() => Err(MindOneError::Config(
+                "MINDONE_LINUX_CREDENTIAL_STORE 必须是有效 UTF-8".to_owned(),
+            )),
+            Some(_) => Err(MindOneError::Config(
+                "MINDONE_LINUX_CREDENTIAL_STORE 只允许 secret-service 或 keyutils".to_owned(),
+            )),
+            None => Ok(Self::PlatformDefault),
+        }
+    }
+
+    fn entry(self, service: &str, account: &str) -> keyring::Result<keyring::Entry> {
+        match self {
+            Self::PlatformDefault => keyring::Entry::new(service, account),
+            #[cfg(target_os = "linux")]
+            Self::LinuxKernel => {
+                let credential =
+                    keyring::keyutils::KeyutilsCredential::new_with_target(None, service, account)?;
+                Ok(keyring::Entry::new_with_credential(Box::new(credential)))
+            }
+        }
     }
 }
 
@@ -136,5 +191,32 @@ mod tests {
         let store = MemorySecretStore::default();
         let secret = SecretString::from("secret".to_owned());
         assert!(store.set("", &secret).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_kernel_backend_selects_the_real_keyutils_store() {
+        assert_eq!(
+            KeyringBackend::from_linux_value(Some(std::ffi::OsStr::new("keyutils")))
+                .expect("keyutils 应被接受"),
+            KeyringBackend::LinuxKernel
+        );
+        assert_eq!(
+            KeyringBackend::from_linux_value(Some(std::ffi::OsStr::new("secret-service")))
+                .expect("Secret Service 应被接受"),
+            KeyringBackend::PlatformDefault
+        );
+        assert!(
+            KeyringBackend::from_linux_value(Some(std::ffi::OsStr::new("memory"))).is_err(),
+            "production 不能回退到进程内凭证库"
+        );
+        let builder = keyring::keyutils::default_credential_builder();
+        assert!(
+            matches!(
+                builder.persistence(),
+                keyring::credential::CredentialPersistence::UntilReboot
+            ),
+            "显式 keyutils 后端必须来自内核持久期的真实 builder"
+        );
     }
 }

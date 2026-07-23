@@ -847,6 +847,8 @@ pub struct ShareState {
     pub alias: String,
     pub tags: Vec<String>,
     pub local_port: u16,
+    #[serde(default = "default_serve_port")]
+    pub serve_port: u16,
     pub tier: PerformanceTier,
     pub trust_level: String,
     pub started_at: String,
@@ -858,6 +860,10 @@ pub struct ShareState {
     pub last_coordinator_rtt_ms: Option<i64>,
     #[serde(default)]
     pub paused_for_temperature: bool,
+}
+
+const fn default_serve_port() -> u16 {
+    8080
 }
 
 #[derive(Debug, Clone)]
@@ -882,7 +888,7 @@ pub async fn load_attestation_target(context: &AppContext) -> CliResult<ActiveAt
             "share worker 未运行，拒绝为非活动节点生成证明".to_owned(),
         ));
     }
-    let serve_state = serve::load_state(context)
+    let serve_state = serve::load_state(context, state.serve_port)
         .await
         .map_err(|error| CliError::Attestation(format!("推理服务未通过身份和健康检查：{error}")))?;
     if serve_state.model_path != state.model_path {
@@ -945,7 +951,7 @@ pub async fn publish(context: &AppContext, args: &SharePublishArgs) -> CliResult
     validate_alias(&alias)?;
     let tags = normalize_tags(&args.tags)?;
     let model = find_verified_model(context, &args.model)?;
-    let serve_state = serve::load_state(context).await?;
+    let serve_state = serve::load_state(context, args.port).await?;
     if serve_state.model_path != model.path {
         return Err(CliError::General(format!(
             "当前本地服务运行模型 {}，与待发布模型 {} 不一致",
@@ -1017,6 +1023,7 @@ pub async fn publish(context: &AppContext, args: &SharePublishArgs) -> CliResult
         // share worker 复用自身严格的 SSE 校验与同步 erase，必须直连受管内部端口；
         // 外部应用只能访问 public proxy，避免同一请求发生两次 erase。
         local_port: serve_state.backend_port,
+        serve_port: serve_state.port,
         tier: published.tier,
         trust_level: format!("{:?}", registered.trust_level),
         started_at,
@@ -2305,11 +2312,13 @@ async fn validate_standard_worker_binding(
 ) -> CliResult<()> {
     validate_standard_claim_identity(state, job)?;
 
-    let serve_state = serve::load_state(context).await.map_err(|error| {
-        CliError::EngineOrSandbox(format!(
-            "Standard 任务拒绝执行：受管 llama.cpp 服务未通过实时身份和健康检查：{error}"
-        ))
-    })?;
+    let serve_state = serve::load_state(context, state.serve_port)
+        .await
+        .map_err(|error| {
+            CliError::EngineOrSandbox(format!(
+                "Standard 任务拒绝执行：受管 llama.cpp 服务未通过实时身份和健康检查：{error}"
+            ))
+        })?;
     let blocking_context = context.clone();
     let model_name = state.model_name.clone();
     let registered_model =
@@ -5482,6 +5491,7 @@ mod tests {
             alias: "test-node".to_owned(),
             tags: vec!["code".to_owned()],
             local_port: 8_080,
+            serve_port: 8_080,
             tier: PerformanceTier::Medium,
             trust_level: "Standard".to_owned(),
             started_at: "2026-07-17T00:00:00Z".to_owned(),
@@ -6229,15 +6239,15 @@ mod tests {
     }
 
     #[test]
-    fn legacy_share_state_without_rtt_deserializes_as_no_sample() {
+    fn legacy_share_state_defaults_to_port_8080_and_no_rtt_sample() {
         let mut encoded = serde_json::to_value(share_state()).expect("状态应可序列化");
         encoded["last_coordinator_rtt_ms"] = serde_json::json!(41);
-        encoded
-            .as_object_mut()
-            .expect("状态 JSON 应为对象")
-            .remove("last_coordinator_rtt_ms");
+        let object = encoded.as_object_mut().expect("状态 JSON 应为对象");
+        object.remove("last_coordinator_rtt_ms");
+        object.remove("serve_port");
 
         let decoded: ShareState = serde_json::from_value(encoded).expect("旧版状态应继续可读");
+        assert_eq!(decoded.serve_port, 8080);
         assert_eq!(decoded.last_coordinator_rtt_ms, None);
         assert!(
             serde_json::to_value(decoded)
