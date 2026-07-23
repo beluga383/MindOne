@@ -71,7 +71,7 @@
 | `engine install` | 必填 `--name vllm\|llama.cpp\|ollama\|tensorrt-llm`；`--version=latest` | 隔离安装并验证官方资产；`20` | 完成；平台真实 smoke 分项验证 |
 | `engine detect` | 无业务参数 | 探测真实 OS/CPU/RAM/GPU 能力；`20` | 完成 |
 | `engine set-default` | 必填位置引擎枚举 | 只接受已安装、未篡改且可服务的适配器；`1`/`20` | 完成 |
-| `serve run` | 必填 `--model`；可选 `--engine`、`--config`；`--port=8080`且范围 `1..=65535` | 强化沙箱中启动回环推理服务；`20`/`21` | 完成 |
+| `serve run` | 必填 `--model`；可选 `--engine`、`--config`；`--port=8080`且范围 `1..=65535` | 强化沙箱中启动回环推理服务；健康等待按完整模型 GiB 从 60 秒递增并封顶 30 分钟；`20`/`21` | 完成 |
 | `serve stop` | `--port=8080`；`--timeout=10`（秒） | PID/启动标记复验后优雅停止指定端口实例；`20` | 完成 |
 | `serve status` | `--port=8080` | 指定端口的真实进程、health、沙箱和资源状态；`20` | 完成 |
 | `share publish` | 必填 `--model`；`--port=8080`；可选 `--alias`、逗号分隔 `--tags` | 绑定指定端口的健康受管实例，注册节点/实例、首次心跳后上线；`10`/`20`/`21` | 完成 |

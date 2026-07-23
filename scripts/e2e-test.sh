@@ -749,9 +749,23 @@ if [ "$CPU_ONLY" = "1" ]; then
 else
     printf 'cpu_only: false\n' >"$TEMP_ROOT/serve-config.yml"
 fi
-MINDONE_HOME="$NODE_HOME" "$CLI" serve run --model "$MODEL_NAME" \
+if ! MINDONE_HOME="$NODE_HOME" "$CLI" serve run --model "$MODEL_NAME" \
     --engine llama.cpp --port "$LLAMA_PORT" --config "$TEMP_ROOT/serve-config.yml" \
-    --json >"$TEMP_ROOT/serve.json"
+    --json >"$TEMP_ROOT/serve.json" 2>"$LOG_DIR/serve-start.log"; then
+    cat "$TEMP_ROOT/serve.json" >&2 2>/dev/null || true
+    cat "$LOG_DIR/serve-start.log" >&2 2>/dev/null || true
+    if [ "$LLAMA_PORT" -eq 8080 ]; then
+        startup_log="$NODE_HOME/logs/llama-server.log"
+    else
+        startup_log="$NODE_HOME/logs/llama-server-${LLAMA_PORT}.log"
+    fi
+    # 此时尚未发送任何推理请求，日志只包含启动参数、模型元数据和沙盒错误；
+    # 输出有界尾部用于区分加载缓慢与监督进程失败。
+    if [ -f "$startup_log" ]; then
+        tail -200 "$startup_log" >&2
+    fi
+    die "受管本地推理启动失败"
+fi
 assert_cli_ok "$TEMP_ROOT/serve.json"
 SERVING=1
 wait_http_status "http://127.0.0.1:${LLAMA_PORT}/health" 200 30 \

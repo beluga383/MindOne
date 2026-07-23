@@ -459,6 +459,7 @@ if ($parsedRelease.Scheme -ne "https" -and -not $loopbackHttpAllowed) {
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ("mindone-install-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $temporary | Out-Null
 $staged = $null
+$replacementBackup = $null
 try {
     $releaseVersionFile = Join-Path $temporary "release-version.txt"
     Invoke-SafeDownload "$releaseUrl/release-version.txt" $releaseVersionFile $loopbackHttpAllowed 4096
@@ -603,7 +604,15 @@ try {
         if ((Test-ReparsePoint $replaceTarget) -or -not (Test-MindOneBinary $binaryPath)) {
             Fail "原子替换前安装目标已变化，拒绝覆盖：$binaryPath"
         }
-        [IO.File]::Replace($staged, $binaryPath, $null)
+        # PowerShell 7/.NET on Windows does not consistently accept a null backup
+        # path for File.Replace. Keep the backup on the same verified directory so
+        # NTFS still performs one atomic replacement, then remove it immediately.
+        $replacementBackup = Join-Path $InstallDir (
+            ".mindone.backup." + [Guid]::NewGuid().ToString("N") + ".exe"
+        )
+        [IO.File]::Replace($staged, $binaryPath, $replacementBackup)
+        Remove-Item -LiteralPath $replacementBackup -Force
+        $replacementBackup = $null
     } else {
         Move-Item -LiteralPath $staged -Destination $binaryPath
     }
@@ -634,6 +643,9 @@ try {
     }
 }
 finally {
+    if ($null -ne $replacementBackup -and (Test-Path -LiteralPath $replacementBackup)) {
+        Remove-Item -LiteralPath $replacementBackup -Force -ErrorAction SilentlyContinue
+    }
     if ($null -ne $staged -and (Test-Path -LiteralPath $staged)) {
         Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
     }

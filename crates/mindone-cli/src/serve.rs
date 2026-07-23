@@ -14,6 +14,10 @@ use crate::node::hardware_probe_output;
 use crate::output::CommandOutput;
 
 const DEFAULT_PORT: u16 = 8080;
+const GIBIBYTE: u64 = 1024 * 1024 * 1024;
+const MINIMUM_STARTUP_TIMEOUT_SECS: u64 = 60;
+const STARTUP_TIMEOUT_SECS_PER_GIB: u64 = 15;
+const MAXIMUM_STARTUP_TIMEOUT_SECS: u64 = 30 * 60;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ActiveServeState {
@@ -59,6 +63,13 @@ pub async fn run(context: &AppContext, args: &ServeRunArgs) -> CliResult<Command
     let manager = manager(context, args.port)?;
     let runtime_directory = service_runtime_directory(context, args.port);
     let log_path = service_log_path(context, args.port);
+    let model_size_bytes = if model.artifacts.is_empty() {
+        model.size_bytes
+    } else {
+        model.artifacts.iter().fold(0_u64, |total, artifact| {
+            total.saturating_add(artifact.size_bytes)
+        })
+    };
     let status = manager
         .start(ServeRequest {
             engine,
@@ -67,7 +78,7 @@ pub async fn run(context: &AppContext, args: &ServeRunArgs) -> CliResult<Command
             port: args.port,
             runtime_directory,
             log_path,
-            health_timeout: Duration::from_secs(30),
+            health_timeout: startup_health_timeout(model_size_bytes),
             cpu_only: advanced.cpu_only,
             additional_args: advanced_args(&advanced),
         })
@@ -92,6 +103,14 @@ pub async fn run(context: &AppContext, args: &ServeRunArgs) -> CliResult<Command
         ),
         state,
     )
+}
+
+fn startup_health_timeout(model_size_bytes: u64) -> Duration {
+    let gibibytes = model_size_bytes.saturating_add(GIBIBYTE - 1) / GIBIBYTE;
+    let seconds = MINIMUM_STARTUP_TIMEOUT_SECS
+        .saturating_add(gibibytes.saturating_mul(STARTUP_TIMEOUT_SECS_PER_GIB))
+        .min(MAXIMUM_STARTUP_TIMEOUT_SECS);
+    Duration::from_secs(seconds)
 }
 
 pub async fn stop(context: &AppContext, args: &ServeStopArgs) -> CliResult<CommandOutput> {
@@ -312,7 +331,10 @@ fn serve_error(error: impl std::fmt::Display) -> CliError {
 
 #[cfg(test)]
 mod tests {
-    use super::{advanced_args, state_file_name, AdvancedConfig};
+    use super::{
+        advanced_args, startup_health_timeout, state_file_name, AdvancedConfig, Duration, GIBIBYTE,
+        MAXIMUM_STARTUP_TIMEOUT_SECS, MINIMUM_STARTUP_TIMEOUT_SECS, STARTUP_TIMEOUT_SECS_PER_GIB,
+    };
 
     #[test]
     fn advanced_config_rejects_network_override() {
@@ -361,5 +383,25 @@ mod tests {
         assert_eq!(state_file_name(8081), "serve-8081.json");
         assert_eq!(state_file_name(65_535), "serve-65535.json");
         assert_ne!(state_file_name(8081), state_file_name(8082));
+    }
+
+    #[test]
+    fn startup_timeout_scales_with_complete_model_size_and_stays_bounded() {
+        assert_eq!(
+            startup_health_timeout(0),
+            Duration::from_secs(MINIMUM_STARTUP_TIMEOUT_SECS)
+        );
+        assert_eq!(
+            startup_health_timeout(1),
+            Duration::from_secs(MINIMUM_STARTUP_TIMEOUT_SECS + STARTUP_TIMEOUT_SECS_PER_GIB)
+        );
+        assert_eq!(
+            startup_health_timeout(16 * GIBIBYTE),
+            Duration::from_secs(MINIMUM_STARTUP_TIMEOUT_SECS + 16 * STARTUP_TIMEOUT_SECS_PER_GIB)
+        );
+        assert_eq!(
+            startup_health_timeout(u64::MAX),
+            Duration::from_secs(MAXIMUM_STARTUP_TIMEOUT_SECS)
+        );
     }
 }

@@ -1547,6 +1547,9 @@ jobs:
             if (@(Get-ChildItem -LiteralPath $installDir -Filter ".mindone.new.*" -Force).Count -ne 0) {
               throw "原子覆盖更新残留暂存文件"
             }
+            if (@(Get-ChildItem -LiteralPath $installDir -Filter ".mindone.backup.*" -Force).Count -ne 0) {
+              throw "原子覆盖更新残留备份文件"
+            }
 
             $marker = Join-Path $dataDir "models\preserve.marker"
             New-Item -ItemType Directory -Path (Split-Path $marker) -Force | Out-Null
@@ -1708,6 +1711,9 @@ jobs:
             }
             if (@(Get-ChildItem -LiteralPath $testRoot -Filter ".mindone.new.*" -Recurse -Force -ErrorAction SilentlyContinue).Count -ne 0) {
               throw "安装目录残留暂存文件"
+            }
+            if (@(Get-ChildItem -LiteralPath $testRoot -Filter ".mindone.backup.*" -Recurse -Force -ErrorAction SilentlyContinue).Count -ne 0) {
+              throw "安装目录残留替换备份"
             }
           }
           finally {

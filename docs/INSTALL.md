@@ -210,7 +210,7 @@ mindone serve status --port 8081
 
 需要许可或登录的 Hugging Face 仓库使用用户终端中的临时 `HF_TOKEN`；MindOne 只把它发送给 HF，不保存或记录。安全输入示例和清除步骤见 [模型文档](MODELS.md)。
 
-`model deploy` 自动选择主 GGUF，并排除 `mmproj`、`imatrix`、MTP 等辅助文件。对于规范分片，只有全部文件的清单 SHA-256、大小、实际 GGUF 结构和内部 split 元数据一致时才登记；任何一片失败都会使部署失败关闭。视觉/多模态模型当前仍是文本主 GGUF 部署路径，不代表图像或音频输入已经开放。
+`model deploy` 自动选择主 GGUF，并排除 `mmproj`、`imatrix`、MTP 等辅助文件。对于规范分片，只有全部文件的清单 SHA-256、大小、实际 GGUF 结构和内部 split 元数据一致时才登记；任何一片失败都会使部署失败关闭。服务健康等待按完整模型大小从 60 秒起递增，每 GiB 增加 15 秒并封顶 30 分钟，避免大型模型尚在真实加载时被固定 30 秒误判；进程失败仍会拒绝。视觉/多模态模型当前仍是文本主 GGUF 部署路径，不代表图像或音频输入已经开放。
 
 受管 CPU-only 不是把 `--device` 写进高级参数。macOS Seatbelt 路径会自动生效；其他平台可在 serve 配置中设置 `cpu_only: true`。管理器固定注入 `--device none`、`--n-gpu-layers 0`、`--no-kv-offload` 和 `--no-op-offload`，拒绝高级配置覆盖，并清除 `LLAMA_ARG_DEVICE`、`LLAMA_ARG_N_GPU_LAYERS`、`LLAMA_ARG_KV_OFFLOAD`、`LLAMA_ARG_NO_KV_OFFLOAD`、`LLAMA_ARG_NO_OP_OFFLOAD`。若启动日志提示 CPU-only 参数冲突，应删除相应 `additional_args` 或父进程环境覆盖，而不是放宽管理器检查。
 
