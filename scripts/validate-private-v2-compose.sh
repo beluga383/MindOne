@@ -34,6 +34,32 @@ command -v docker >/dev/null 2>&1 || fail "未找到 docker"
 docker compose version >/dev/null 2>&1 || fail "未找到 docker compose v2"
 command -v python3 >/dev/null 2>&1 || fail "未找到 python3"
 
+# Compose 规定父进程环境优先于 --env-file。门禁要验证自己生成的完整/缺项矩阵，
+# 因而先清除所有会参与这三份 Compose 文件插值的变量，避免 CI 的 GITHUB_ENV
+# 或运维终端残留值悄悄补齐本应缺失的安全配置。
+unset \
+    MINDONE_CLOUDFLARED_TOKEN_FILE \
+    MINDONE_COORDINATOR_HOST_PORT \
+    MINDONE_COORDINATOR_IMAGE \
+    MINDONE_EVALUATION_DRAW_DENOMINATOR \
+    MINDONE_EVALUATION_INSTANCE_COOLDOWN_SECONDS \
+    MINDONE_GITHUB_CLIENT_ID \
+    MINDONE_POSTGRES_APP_PASSWORD \
+    MINDONE_POSTGRES_PASSWORD \
+    MINDONE_POSTGRES_TLS_DIR \
+    MINDONE_PRIVATE_EVALUATION_ACCOUNT_HOURLY_LIMIT \
+    MINDONE_PRIVATE_EVALUATION_CATALOG_HOURLY_LIMIT \
+    MINDONE_PRIVATE_EVALUATION_COOLDOWN_SECONDS \
+    MINDONE_PRIVATE_EVALUATION_DEVICE_HOURLY_LIMIT \
+    MINDONE_PRIVATE_EVALUATION_GLOBAL_RESERVE_ENTRIES \
+    MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE \
+    MINDONE_PRIVATE_EVALUATION_NODE_HOURLY_LIMIT \
+    MINDONE_QUALITY_EVIDENCE_HOST_DIR \
+    MINDONE_QUALITY_KEYS_HOST_DIR \
+    MINDONE_STANDARD_DATA_KEY_FILE \
+    MINDONE_TOKEN_PEPPER \
+    RUST_LOG
+
 install -d -m 0700 \
     "${temp_dir}/postgres-tls" \
     "${temp_dir}/trusted-keys" \
@@ -88,9 +114,14 @@ cp -- "${base_env}" "${complete_env}"
 missing_key_env=${temp_dir}/missing-key.env
 grep -v '^MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE=' \
     "${complete_env}" >"${missing_key_env}"
-if docker compose --env-file "${missing_key_env}" \
-    -f "${base_compose}" -f "${private_overlay}" \
-    --profile operator config --quiet >/dev/null 2>&1; then
+if (
+    # Compose 的插值优先读取父进程环境；CI 会在 GITHUB_ENV 中导出完整配置。
+    # 负向测试必须显式移除目标变量，不能只从 --env-file 删除。
+    unset MINDONE_PRIVATE_EVALUATION_HMAC_KEY_HOST_FILE
+    docker compose --env-file "${missing_key_env}" \
+        -f "${base_compose}" -f "${private_overlay}" \
+        --profile operator config --quiet
+) >/dev/null 2>&1; then
     fail "缺 private HMAC 宿主路径时 overlay 必须拒绝渲染"
 fi
 
@@ -104,9 +135,12 @@ for omitted_budget in \
 do
     missing_budget_env=${temp_dir}/missing-${omitted_budget}.env
     grep -v "^${omitted_budget}=" "${complete_env}" >"${missing_budget_env}"
-    if docker compose --env-file "${missing_budget_env}" \
-        -f "${base_compose}" -f "${private_overlay}" \
-        --profile operator config --quiet >/dev/null 2>&1; then
+    if (
+        unset "${omitted_budget}"
+        docker compose --env-file "${missing_budget_env}" \
+            -f "${base_compose}" -f "${private_overlay}" \
+            --profile operator config --quiet
+    ) >/dev/null 2>&1; then
         fail "缺 ${omitted_budget} 时 overlay 必须拒绝渲染"
     fi
 done
