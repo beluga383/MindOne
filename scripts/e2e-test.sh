@@ -2162,7 +2162,7 @@ assert_port_closed "$LLAMA_PORT" || die "停止后 llama-server 端口仍开放"
 step "确认受管引擎与 worker 的活动/轮转日志不含 Prompt 或 Response 明文"
 python3 - "$TEMP_ROOT/request.json" "$TEMP_ROOT/inference.json" \
     "$TEMP_ROOT/completion-request.json" "$TEMP_ROOT/completion-inference.json" \
-    "$TEMP_ROOT/policy-request.json" "$NODE_HOME/logs" \
+    "$TEMP_ROOT/policy-request.json" "$NODE_HOME/logs" "$TEMP_ROOT/serve.json" \
     "$chat_stream_nonce" "$completion_stream_nonce" <<'PY'
 import json
 import pathlib
@@ -2179,6 +2179,8 @@ with open(sys.argv[4], encoding="utf-8") as stream:
     completion_response = json.load(stream)
 with open(sys.argv[5], encoding="utf-8") as stream:
     policy_request = json.load(stream)
+with open(sys.argv[7], encoding="utf-8") as stream:
+    serve_response = json.load(stream)
 
 messages = request.get("messages")
 if not isinstance(messages, list) or not messages:
@@ -2230,12 +2232,22 @@ if policy_nonce_match is None:
 markers.update({
     "policy-rejected prompt": policy_prompt.encode("utf-8"),
     "policy-rejected nonce": policy_nonce_match.group(0).encode("utf-8"),
-    "chat stream nonce": sys.argv[7].encode("utf-8"),
-    "completion stream nonce": sys.argv[8].encode("utf-8"),
+    "chat stream nonce": sys.argv[8].encode("utf-8"),
+    "completion stream nonce": sys.argv[9].encode("utf-8"),
 })
 log_dir = pathlib.Path(sys.argv[6])
+serve_data = serve_response.get("data")
+if not isinstance(serve_data, dict):
+    raise SystemExit("serve 响应缺少 data")
+engine_log_value = serve_data.get("log_path")
+if not isinstance(engine_log_value, str) or not engine_log_value:
+    raise SystemExit("serve 响应缺少 log_path")
+engine_log = pathlib.Path(engine_log_value)
+if engine_log.parent.resolve() != log_dir.resolve():
+    raise SystemExit("serve 日志路径不在受管节点日志目录")
+
 paths = []
-for basename in ("llama-server.log", "share-worker.log"):
+for basename in (engine_log.name, "share-worker.log"):
     matches = sorted(log_dir.glob(f"{basename}*"))
     if not matches:
         raise SystemExit(f"缺少应受检查的日志：{basename}")
