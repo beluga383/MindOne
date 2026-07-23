@@ -1,22 +1,22 @@
 # MindOne v1.0.2 续接任务与行为合同
 
-> 2026-07-23 当前增量：工作树源码目标仍是连续 `0001..0039`，65 项 HF 目录、硬件推荐、用户端一键 GGUF 部署、40 个 CLI/TUI 对等动作、三档速度路由、推理 API Key 与 OpenAI JSON/SSE 网关均已完成门禁。TUI 已重做为响应式 Space/Action/Overview/Activity/Command 工作台。v1.0.2 精确提交已通过 Security、完整 CI、Release 重复复验、五平台打包、SBOM/Sigstore/provenance，并已发布为 GitHub latest；五个 provenance 均再次用 `gh attestation verify` 验证。最终 workflow publish 曾因非 Git 目录缺少仓库上下文失败，现有 Release 由同一已校验聚合 artifact 显式指定仓库创建，后续 main 已补 `GH_REPO`。Apple Developer ID/notarization 与 Windows Authenticode 均未配置，不能宣称平台原生签名。当前 v26 production 仍健康运行 v26，尚未停机或迁移。Cloudflare 已登录并停在新建独立 `mindone` Tunnel 的最终保存按钮前，尚未创建凭据或 DNS route。
+> 2026-07-23 当前增量：工作树源码目标仍是连续 `0001..0039`，65 项 HF 目录、硬件推荐、用户端一键 GGUF 部署、40 个 CLI/TUI 对等动作、三档速度路由、推理 API Key 与 OpenAI JSON/SSE 网关均已完成门禁。TUI 已重做为响应式 Space/Action/Overview/Activity/Command 工作台。v1.0.2 精确提交已通过 Security、完整 CI、Release 重复复验、五平台打包、SBOM/Sigstore/provenance，并已发布为 GitHub latest；五个 provenance 均再次用 `gh attestation verify` 验证。最终 workflow publish 曾因非 Git 目录缺少仓库上下文失败，现有 Release 由同一已校验聚合 artifact 显式指定仓库创建，后续 main 已补 `GH_REPO`。Apple Developer ID/notarization 与 Windows Authenticode 均未配置，不能宣称平台原生签名。当前 v26 production 仍健康运行 v26，尚未停机或迁移。Cloudflare 中已新建独立 `mindone` Tunnel，并保存唯一的 `api.holarchic.cn`、全路径 `*`、`http://coordinator:8787` 路由；DNS 记录创建成功，专用 connector token 已放入本机 Git 忽略的 `0600` 文件且 overlay 静态解析通过。为避免把旧 v26 通过不符合当前代理身份/API 合同的临时网络发布，connector 仍保持非活跃，公网 `/ready` 当前预期返回 Cloudflare `530`。
 
 更新时间：2026-07-23（Asia/Shanghai）
 
 本文是当前工作树的交接入口。下一位接手者先读 `AGENTS.md`，再按本文顺序执行。不要从旧聊天里的 v29/v31/v35 停止点继续，也不要把脚本存在、复用数据库的 migration metadata 或历史测试结果写成当前最终树已经通过。
 
-> 当前结论：源码现为连续 schema `0001..0039`。当前 workspace `590/0/5`、fresh-v39 `49/49`、API Key 网关 JSON/SSE 数据库 E2E，以及 production 备份恢复副本的真实 `26→39` 演练均已通过；live 仍是 v26。v1.0.2 CLI 与五平台资产已经公开发布；随后修复发布仓库上下文的代码基线 `f4adc51` 又在 CI `29988119866` 与 Security `29988121928` 全绿。公网 TLS 链仍依赖尚未创建的独立 Tunnel，因此公开 CLI 已发布，但官方 API 尚未上线。
+> 当前结论：源码现为连续 schema `0001..0039`。当前 workspace `590/0/5`、fresh-v39 `49/49`、API Key 网关 JSON/SSE 数据库 E2E，以及 production 备份恢复副本的真实 `26→39` 演练均已通过；live 仍是 v26。v1.0.2 CLI 与五平台资产已经公开发布；随后修复发布仓库上下文的代码基线 `f4adc51` 又在 CI `29988119866` 与 Security `29988121928` 全绿。独立 `mindone` Tunnel、DNS 与目标 origin 已配置，但 connector 要与 v39 production overlay 同步启用；在 live 升级前官方 API 仍未上线，不能把 `530` 或 Dashboard 配置存在写成公网就绪。
 
 当前 macOS arm64 又完成两层仓库外安装闭环：源码 `cargo install --locked --path crates/mindone-cli --root <隔离目录>` 成功；公开 v1.0.2 latest 的 `aarch64-apple-darwin` 资产也经远程安装器下载、checksum 验证并装入另一隔离目录。两者的版本、非交互中文帮助和真实 80×24 PTY 裸 `mindone` 渲染/按 `q` 退出均为 0。Windows/Linux 原生构建与安装卸载由公开 Actions 分层验证；Windows 交互 TUI 和真实模型启动仍不从该 macOS 证据外推。
 
 ARM64 Linux 现有两轮互补证据。既有无网络、只读源码验证覆盖固定 `rust:1.88.0-bookworm` 镜像内 CLI `176/0/2`、strict Clippy、release build 与 SHA-256 安装/重装/默认卸载/purge。当前修正版又在同架构、Rust 1.88、无网络和源码只读条件下通过全 workspace check；CLI library `173/0/1`、入口 `4/0/0`、Linux 适用二进制合同 `7/0/0` 全部通过，release `--version`、非交互裸命令与真实 80×24 PTY TUI 均退出 0。该轮发现共享测试上下文错误使用真实 Secret Service，在无桌面 DBus 的 Linux 上会让并发刷新用例失败；现已增加仅 `cfg(test)` 可见的内存凭证库构造器，production 仍强制系统凭证库。当前容器未预装 Clippy，因此本轮没有把“组件缺失”冒充当前 Linux strict Clippy；该门禁仍由既有 Linux 证据和当前 macOS 全 workspace strict Clippy 覆盖。
 
-此前还用 Debian x86_64 交叉工具链构建 release，并在真实 amd64 Debian 用户态执行版本、中文帮助、硬件推荐、`api info`，再完成相同 SHA-256 安装/`--launch`/重装/卸载/purge 闭环。安装器新增 Unix `--launch` / Windows `-Launch`，可用单条命令安装并直接进入 TUI，CI/管道会安全降级为帮助页。公开仓库、两份 raw 安装器与 latest v1.0.2 Release 均匿名返回 200，远程安装器现可下载并校验平台二进制。`api.holarchic.cn` 的 Tunnel/DNS route 尚未提交，所以公网 API 仍未上线；Windows 真机模型启动和平台原生签名仍待外部验证。
+此前还用 Debian x86_64 交叉工具链构建 release，并在真实 amd64 Debian 用户态执行版本、中文帮助、硬件推荐、`api info`，再完成相同 SHA-256 安装/`--launch`/重装/卸载/purge 闭环。安装器新增 Unix `--launch` / Windows `-Launch`，可用单条命令安装并直接进入 TUI，CI/管道会安全降级为帮助页。公开仓库、两份 raw 安装器与 latest v1.0.2 Release 均匿名返回 200，远程安装器现可下载并校验平台二进制。`api.holarchic.cn` 的 Tunnel/DNS route 已提交，但 connector 因 live v26 尚未切换而保持非活跃，所以公网 API 仍未上线；Windows 真机模型启动和平台原生签名仍待外部验证。
 
 Windows 侧已有交叉与原生两层证据。脚本用微软官方 PowerShell 7.5 解析器真实解析 `install.ps1` 与 `uninstall.ps1`；官方哈希校验的 `cargo-xwin 0.23.0`、Microsoft SDK/CRT 和 `llvm-mingw 20260616` 又在 macOS arm64 完成 `x86_64-pc-windows-msvc` 全 workspace/all-target/all-feature check、`-D warnings` 严格 Clippy 与 release 构建。最终 17 MiB 产物为 `PE32+ console x86-64`，静态 CRT 后不再导入 `VCRUNTIME140.dll`/`api-ms-win-crt-*`，且 Job Object 三个关键 API 均存在。公开 `windows-latest` job 已进一步通过原生编译、`dumpbin`、安装、`-Launch` 非交互降级、默认/`-NoModifyPath` PATH 合同、原子替换、安全拒绝和默认/purge 卸载。该 Runner 证据仍不等于用户 Windows 真机上的交互 TUI、Credential Manager、Job Object 生命周期或真实模型启动。
 
-公网实测显示 `https://holarchic.cn` 的 Cloudflare/TLS 正常，但 `/health`、`/ready`、`/auth/login` 和 `/v1/models` 均由现有官网返回普通 404，不是 MindOne；把根域整站 `/*` 切到协调器会破坏官网。当前合同因此改用专用子域 `https://api.holarchic.cn`，Base URL 为 `https://api.holarchic.cn/v1`，并只在该子域把 `/*` 转给 `http://coordinator:8787`。子域当前尚无可用 TLS/route，必须由部署方配置后再做 identity/CF-Ray E2E；旧客户端配置不会自动覆盖，需显式 `mindone config set server.url https://api.holarchic.cn`。
+公网实测显示 `https://holarchic.cn` 的 Cloudflare/TLS 正常，但 `/health`、`/ready`、`/auth/login` 和 `/v1/models` 均由现有官网返回普通 404，不是 MindOne；把根域整站 `/*` 切到协调器会破坏官网。当前合同因此改用专用子域 `https://api.holarchic.cn`，Base URL 为 `https://api.holarchic.cn/v1`，并只在该子域把全路径 `*` 转给 `http://coordinator:8787`。Dashboard 已复核该唯一规则及默认 `http_status:404` catch-all，根域和既有 `aistudio`/`sd` Tunnel 未修改；connector 未启动时公网 `/ready` 返回 `530`，必须等 live v39 overlay 启动后再做 identity/CF-Ray E2E。旧客户端配置不会自动覆盖，需显式 `mindone config set server.url https://api.holarchic.cn`。
 
 ## 1. 工作树和受保护现场
 
@@ -26,6 +26,7 @@ Windows 侧已有交叉与原生两层证据。脚本用微软官方 PowerShell 
 - MVP 主体已经提交；继续操作前仍须重新运行 `git status --short` 并逐路径审阅本轮增量，不得覆盖用户文件或把 ignored 的 production Secret、备份、模型和构建缓存加入版本控制。
 - 禁止 `git add .`、`git clean`、reset、批量覆盖或删除。最终只能逐路径审阅和 stage，三个顶层规格输入默认保留。
 - production `mindone-coordinator-1` 当前健康，经 loopback `127.0.0.1:18787` 可达；production 数据库只读确认仍为 `26|1|26|t`。当前 v26 已备份并在独立 tmpfs PostgreSQL 上完成 v39 演练，但 live 停机、迁移与切换尚未执行。
+- Cloudflare 独立 `mindone` Tunnel 已创建，路由为 `api.holarchic.cn` 全路径到 `http://coordinator:8787`，token 文件与 `.env` 路径只存在本机 ignored 配置。当前没有 `mindone-cloudflared` 容器；不得为了消除 `530` 临时把旧 v26 coordinator 接入隧道、复用 `18787`、放宽 trusted proxy 或修改既有 Tunnel。
 - PostgreSQL 测试容器：`mindone-pg-final-20260718`，loopback 端口 `55435`。已有证据库不得 drop、truncate 或复用为 fresh gate。
 - `*:8787` 由其他 Python 服务占用；LM Studio、它的 llama-server、现有 cloudflared、`aistudio` 和其他项目均不在本任务范围，禁止停止或修改。
 - 本机内存压力高。Cargo、PostgreSQL gate、Docker 和真实模型 E2E 必须串行；所有 Cargo 命令固定 `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1` 并加 `-j1`。

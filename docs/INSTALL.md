@@ -107,7 +107,7 @@ Windows 当前的本地沙盒能力只声明为 `Experimental`：在尚未建立
 
 ## 2. 初始化与登录
 
-全新配置默认使用官方专用 API origin `https://api.holarchic.cn`；该子域用于避免覆盖 `holarchic.cn` 的现有官网。部署方完成子域 TLS/Tunnel 前登录会明确失败，不能把官网 404 当成协调器。已有 `config.toml` 始终保留其原值，不会在升级时被覆盖；曾配置根域的客户端应显式执行 `mindone config set server.url https://api.holarchic.cn`。本地开发才改为 loopback：
+全新配置默认使用官方专用 API origin `https://api.holarchic.cn`；该子域用于避免覆盖 `holarchic.cn` 的现有官网。独立 Tunnel、DNS 与目标 origin 已配置，但 production connector/live v39 尚未启动；当前 Cloudflare `530` 表示未上线，不能把它或官网 404 当成协调器。已有 `config.toml` 始终保留其原值，不会在升级时被覆盖；曾配置根域的客户端应显式执行 `mindone config set server.url https://api.holarchic.cn`。本地开发才改为 loopback：
 
 ```bash
 mindone --version

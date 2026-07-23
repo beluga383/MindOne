@@ -549,6 +549,8 @@ curl -sS -o /tmp/mindone-unauthorized.json -w '%{http_code}\n' \
 
 只有容器内和公网 `/ready` 都返回 `200`、connector 为 running/healthy，才能证明这三层路径就绪。最后一项在没有 Token 时应为 `401`。不得修改 Nameserver、删除现有 DNS、开启付费功能或暴露 5432/8787/18787/8080/9090。
 
+2026-07-23 已在 Cloudflare Dashboard 创建独立 `mindone` remotely-managed Tunnel，并复核唯一已发布应用程序规则为 `api.holarchic.cn`、路径 `*`、服务 `http://coordinator:8787`；Dashboard 同时确认 DNS 记录创建成功。根域以及既有 `aistudio`、`sd` Tunnel 均未修改。专用 token 仅保存在本机 Git/Docker build context 忽略的 `deploy/secrets/cloudflared/token`（`0600`），`.env` 只含该文件路径；双 Compose 静态 `config --quiet` 已通过。由于 live coordinator/database 仍为 v26，当前没有启动 connector，也没有把旧 coordinator 临时接入 `tunnel_edge` 或把 `18787` 作为 origin；公网 `/ready` 因而预期返回 Cloudflare `530`。完成受控 `v26→v39` 切换后，应使用上面的完整 overlay 一次性启动 coordinator 与 connector，再执行三层 identity、`CF-Ray`、匿名 `401` 和端口暴露验收。
+
 ## 数据库备份和恢复
 
 备份应使用专用只读账号并加密保存：
