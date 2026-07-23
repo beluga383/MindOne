@@ -359,7 +359,7 @@ fn detect_windows() -> CapabilityReport {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn command_text(program: &str, args: &[&str]) -> String {
     Command::new(program)
         .args(args)

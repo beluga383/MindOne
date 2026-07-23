@@ -309,13 +309,13 @@ dev_compose up -d
 
 echo "[step] 2/7 验证迁移与容器状态"
 for _ in $(seq 1 30); do
-  if docker ps --filter "name=${PROJECT_NAME}-database-migrator-1" --filter "status=exited" --format '{{.Names}}' | rg -q "${PROJECT_NAME}-database-migrator-1"; then
+  if docker ps --filter "name=${PROJECT_NAME}-database-migrator-1" --filter "status=exited" --format '{{.Names}}' | grep -Fq "${PROJECT_NAME}-database-migrator-1"; then
     break
   fi
   sleep 1
 done
 docker logs --tail 120 "${PROJECT_NAME}-database-migrator-1" | tee "$LOG_DIR/migrator.log"
-if ! docker logs --tail 120 "${PROJECT_NAME}-database-migrator-1" | rg -q "数据库迁移已完成|Database migration completed"; then
+if ! docker logs --tail 120 "${PROJECT_NAME}-database-migrator-1" | grep -Eq "数据库迁移已完成|Database migration completed"; then
   fail "database-migrator 未完成"
   exit 1
 fi
@@ -373,7 +373,7 @@ if [ "$SKIP_CLI" -eq 0 ]; then
   ok "auth status（未登录）"
 
   smoke_cli config set server_url "http://127.0.0.1:$PORT" > /dev/null
-  if ! smoke_cli config get server_url | rg -q "http://127.0.0.1:$PORT"; then
+  if ! smoke_cli config get server_url | grep -Fq "http://127.0.0.1:$PORT"; then
     fail "config get server_url"
     exit 1
   fi

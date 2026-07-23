@@ -1292,16 +1292,17 @@ async fn postgres_contribution_routing_only_breaks_congested_near_ties() {
         )
         .await;
     }
-    sqlx::query("UPDATE node_metrics SET current_concurrent=1 WHERE node_id=ANY($1)")
+    sqlx::query("UPDATE node_metrics SET current_concurrent=0 WHERE node_id=ANY($1)")
         .bind(&physical_node_ids)
         .execute(&pool)
         .await
-        .expect("应能设置不参与拥堵判定的节点自报并发夹具");
+        .expect("应能设置 Standard 节点空闲夹具");
 
-    // 节点都自报 current_concurrent=1，但服务端实际空闲槽位仍为 10；ready
-    // demand=6 不拥堵。若错误信任节点自报量会得到 5 个槽位并提前启用贡献。
+    // Standard 的保守硬过滤要求节点自报空闲，并且为避免同机争用，每台物理
+    // 节点只提供一个独占 Standard 槽。五台节点共有 5 个服务端空闲槽，
+    // demand=5 不拥堵，因此贡献值不得改变基础路由顺序。
     let mut noncongested_jobs = Vec::new();
-    for index in 0..6 {
+    for index in 0..5 {
         noncongested_jobs.push(
             create_test_job(
                 &app,
@@ -1349,14 +1350,14 @@ async fn postgres_contribution_routing_only_breaks_congested_near_ties() {
     )
     .await;
 
-    // 上一步终结一项后还剩 5 项，再加入 6 项得到 ready demand=11 > 服务端
-    // 空闲槽位=10。最高贡献节点只比最佳基础分差一个 10ms RTT，处于 2% 近同分
-    // 窗口，因此 Standard 应由贡献 percentile 决胜。
+    // 上一步终结一项后还剩 4 项，再加入 2 项得到 ready demand=6 > 服务端
+    // Standard 独占空闲槽位=5。最高贡献节点只比最佳基础分差一个 10ms RTT，
+    // 处于 2% 近同分窗口，因此 Standard 应由贡献 percentile 决胜。
     let mut congested_jobs = noncongested_jobs
         .into_iter()
         .filter(|job_id| job_id != &noncongested_job)
         .collect::<Vec<_>>();
-    for index in 0..6 {
+    for index in 0..2 {
         congested_jobs.push(
             create_test_job(
                 &app,
@@ -4186,6 +4187,24 @@ async fn real_postgres_job_settlement_and_failure_no_charge() {
         value_str(&reaper_model, "/model_instance_id"),
         model_instance_id
     );
+    let _ = call(
+        &app,
+        Method::POST,
+        &heartbeat_path,
+        Some(json!({
+            "current_concurrent": 0,
+            "vram_used_mib": 1024,
+            "vram_total_mib": 8192,
+            "policy": {
+                "reject_tags": [],
+                "max_concurrent": 2,
+                "gpu_temp_limit_c": null,
+                "vram_reserve_mib": 512
+            }
+        })),
+        Some(&node_access_token),
+    )
+    .await;
     let (_, balance_before_expired_lease) = call(
         &app,
         Method::GET,
