@@ -58,15 +58,14 @@ function Remove-MindOneFromUserPath([string]$Directory) {
     $kept = [Collections.Generic.List[string]]::new()
     $removed = $false
     foreach ($entry in $userPath.Split(';')) {
-        if ([string]::IsNullOrWhiteSpace($entry)) {
-            continue
-        }
         $matchesInstall = $false
-        try {
-            $matchesInstall = Test-SamePath $entry.Trim().Trim('"') $Directory
-        }
-        catch {
-            $matchesInstall = $false
+        if (-not [string]::IsNullOrWhiteSpace($entry)) {
+            try {
+                $matchesInstall = Test-SamePath $entry.Trim().Trim('"') $Directory
+            }
+            catch {
+                $matchesInstall = $false
+            }
         }
         if ($matchesInstall) {
             $removed = $true
@@ -82,15 +81,14 @@ function Remove-MindOneFromUserPath([string]$Directory) {
 
     $processKept = [Collections.Generic.List[string]]::new()
     foreach ($entry in $env:Path.Split(';')) {
-        if ([string]::IsNullOrWhiteSpace($entry)) {
-            continue
-        }
         $matchesInstall = $false
-        try {
-            $matchesInstall = Test-SamePath $entry.Trim().Trim('"') $Directory
-        }
-        catch {
-            $matchesInstall = $false
+        if (-not [string]::IsNullOrWhiteSpace($entry)) {
+            try {
+                $matchesInstall = Test-SamePath $entry.Trim().Trim('"') $Directory
+            }
+            catch {
+                $matchesInstall = $false
+            }
         }
         if (-not $matchesInstall) {
             $processKept.Add($entry)

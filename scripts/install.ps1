@@ -20,12 +20,12 @@ function Add-MindOneToUserPath([string]$Directory) {
         Fail "安装目录包含 PATH 分隔符，无法安全写入用户 PATH：$Directory"
     }
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    $entries = @()
-    if (-not [string]::IsNullOrWhiteSpace($userPath)) {
-        $entries = @($userPath.Split(';') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    }
+    $entries = if ($null -eq $userPath) { @() } else { @($userPath.Split(';')) }
     $alreadyPresent = $false
     foreach ($entry in $entries) {
+        if ([string]::IsNullOrWhiteSpace($entry)) {
+            continue
+        }
         $candidate = $entry.Trim().Trim('"')
         try {
             if (Test-SamePath $candidate $Directory) {
@@ -38,10 +38,10 @@ function Add-MindOneToUserPath([string]$Directory) {
         }
     }
     if (-not $alreadyPresent) {
-        $newUserPath = if ($entries.Count -eq 0) {
+        $newUserPath = if ([string]::IsNullOrEmpty($userPath)) {
             $Directory
         } else {
-            "$Directory;$($entries -join ';')"
+            "$Directory;$userPath"
         }
         if ($newUserPath.Length -gt 32767) {
             Fail "用户 PATH 超过 Windows 长度上限，无法安全加入 MindOne"
@@ -50,9 +50,13 @@ function Add-MindOneToUserPath([string]$Directory) {
         Write-Host "已把 MindOne 命令目录写入用户 PATH；新终端可直接运行 mindone。"
     }
 
-    $processEntries = @($env:Path.Split(';') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $processPath = $env:Path
+    $processEntries = if ($null -eq $processPath) { @() } else { @($processPath.Split(';')) }
     $processHasDirectory = $false
     foreach ($entry in $processEntries) {
+        if ([string]::IsNullOrWhiteSpace($entry)) {
+            continue
+        }
         try {
             if (Test-SamePath $entry.Trim().Trim('"') $Directory) {
                 $processHasDirectory = $true
@@ -63,7 +67,11 @@ function Add-MindOneToUserPath([string]$Directory) {
         }
     }
     if (-not $processHasDirectory) {
-        $env:Path = "$Directory;$env:Path"
+        $env:Path = if ([string]::IsNullOrEmpty($processPath)) {
+            $Directory
+        } else {
+            "$Directory;$processPath"
+        }
     }
 }
 

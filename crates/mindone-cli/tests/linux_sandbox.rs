@@ -155,19 +155,22 @@ fn real_linux_sandbox_applies_four_layers_serves_loopback_and_rejects_outbound()
         .expect("应读取主动连接目标")
         .port();
     let outbound_script = format!(
-        "import socket, sys\n\
-         try:\n\
-             socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n\
-         except OSError:\n\
-             pass\n\
-         else:\n\
-             sys.exit(11)\n\
-         stream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n\
-         try:\n\
-             stream.connect(('127.0.0.1', {outbound_port}))\n\
-         except OSError:\n\
-             sys.exit(0)\n\
-         sys.exit(12)\n"
+        concat!(
+            "import socket, sys\n",
+            "try:\n",
+            "    socket.socket(socket.AF_INET, socket.SOCK_DGRAM)\n",
+            "except OSError:\n",
+            "    pass\n",
+            "else:\n",
+            "    sys.exit(11)\n",
+            "stream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n",
+            "try:\n",
+            "    stream.connect(('127.0.0.1', {}))\n",
+            "except OSError:\n",
+            "    sys.exit(0)\n",
+            "sys.exit(12)\n",
+        ),
+        outbound_port
     );
     let outbound_plan = build_launch_plan_with_supervisor(
         &python,

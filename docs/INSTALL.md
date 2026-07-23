@@ -28,7 +28,7 @@ $installer = [scriptblock]::Create((irm https://raw.githubusercontent.com/beluga
 mindone --version
 ```
 
-`-Launch` 与 Unix 的 `--launch` 含义相同；Windows CI 环境不会误入交互 TUI。安装器默认只把安装目录加入当前用户 PATH，并同步当前 PowerShell 进程，不修改系统 PATH；`-NoModifyPath` 或 `MINDONE_INSTALL_NO_MODIFY_PATH=1` 可关闭。
+`-Launch` 与 Unix 的 `--launch` 含义相同；Windows CI 环境不会误入交互 TUI。安装器默认只把安装目录加入当前用户 PATH，并同步当前 PowerShell 进程，不修改系统 PATH；安装和默认卸载不会重排或规范化其他 PATH 项，原有空项、空格和尾分隔符也会原样保留。`-NoModifyPath` 或 `MINDONE_INSTALL_NO_MODIFY_PATH=1` 可关闭。
 
 从源码安装：
 

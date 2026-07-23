@@ -1439,7 +1439,17 @@ jobs:
 
           $python = (Get-Command python).Source
           $pathBefore = $env:Path
+          $runnerUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          $syntheticUserPath = if ([string]::IsNullOrEmpty($runnerUserPath)) {
+            "$testRoot\path-preserve-sentinel;; "
+          } else {
+            "$runnerUserPath;; "
+          }
+          [Environment]::SetEnvironmentVariable("Path", $syntheticUserPath, "User")
           $userPathBefore = [Environment]::GetEnvironmentVariable("Path", "User")
+          if ($userPathBefore -cne $syntheticUserPath) {
+            throw "无法构造保留空 PATH 项的 Windows 回归环境"
+          }
           $server = Start-Process -FilePath $python `
             -ArgumentList @("-m", "http.server", "18082", "--bind", "127.0.0.1") `
             -WorkingDirectory $releaseRoot `
@@ -1717,7 +1727,7 @@ jobs:
             }
           }
           finally {
-            [Environment]::SetEnvironmentVariable("Path", $userPathBefore, "User")
+            [Environment]::SetEnvironmentVariable("Path", $runnerUserPath, "User")
             $env:Path = $pathBefore
             if ($hadLocalAppData) {
               $env:LOCALAPPDATA = $originalLocalAppData
